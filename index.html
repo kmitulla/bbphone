@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#0b1020" />
+  <meta name="theme-color" content="#0a0e1f" />
 
-  <!-- Damit es sich als Web-App vom iPhone-Startbildschirm wie eine App anfühlt -->
+  <!-- Web-App fürs iPhone -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -19,10 +19,12 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <!-- weiche Farbflächen im Hintergrund (Liquid-Glass-Look) -->
+  <div class="bg-orbs" aria-hidden="true"><span></span><span></span><span></span></div>
 
   <!-- ================== ANMELDEN ================== -->
   <section id="login-screen" class="screen active">
-    <div class="card">
+    <div class="card glass">
       <div class="brand"><span class="brand-icon">🌙</span><h1>Babyphone</h1></div>
       <p class="subtitle">Bitte anmelden</p>
 
@@ -40,7 +42,7 @@
 
   <!-- ================== START / RÄUME ================== -->
   <section id="home-screen" class="screen">
-    <div class="card">
+    <div class="card glass">
       <div class="topbar">
         <div class="brand small"><span class="brand-icon">🌙</span><h1>Babyphone</h1></div>
         <button id="logout-btn" class="btn btn-ghost btn-sm">Abmelden</button>
@@ -65,29 +67,31 @@
   <section id="child-screen" class="screen">
     <video id="local-video" class="full-video" autoplay playsinline muted></video>
 
-    <!-- Eltern-Video (klein eingeblendet), wenn Eltern ihre Kamera teilen -->
-    <div id="parent-pip" class="pip hidden"></div>
+    <!-- Bühne für das Eltern-Video: groß; bei mehreren Eltern Splitscreen -->
+    <div id="parent-stage" class="parent-stage hidden"></div>
 
     <!-- Schwarzer "Bildschirm aus"-Vorhang -->
     <div id="screen-off-curtain" class="curtain hidden">
       <p>Bildschirm aus – läuft weiter.<br />Tippen zum Aufwecken.</p>
     </div>
 
-    <div class="status-pill" id="child-status">Verbinde…</div>
-    <button class="corner-btn" data-open="child-menu">⚙︎</button>
+    <div class="top-chips">
+      <div class="status-pill glass" id="child-status">Verbinde…</div>
+      <div class="presence-chip glass hidden" id="child-presence"></div>
+    </div>
+    <button class="corner-btn glass" data-open="child-menu">⚙︎</button>
 
-    <!-- Sprech-Hinweis: leuchtet, wenn Eltern reden -->
     <div id="parent-talking" class="talk-indicator hidden">🔊 Eltern sprechen…</div>
 
     <div class="dock">
-      <button id="child-cam-btn" class="dock-btn"><span class="ic">🔄</span><span>Kamera</span></button>
-      <button id="child-video-toggle" class="dock-btn"><span class="ic">📷</span><span>Video</span></button>
-      <button id="screen-off-btn" class="dock-btn"><span class="ic">🌙</span><span>Display aus</span></button>
+      <button id="child-cam-btn" class="dock-btn glass"><span class="ic">🔄</span><span>Kamera</span></button>
+      <button id="child-video-toggle" class="dock-btn glass"><span class="ic">📷</span><span>Video</span></button>
+      <button id="screen-off-btn" class="dock-btn glass"><span class="ic">🌙</span><span>Display aus</span></button>
     </div>
 
     <!-- Menü / Einstellungen Kind -->
     <div id="child-menu" class="sheet hidden">
-      <div class="sheet-inner">
+      <div class="sheet-inner glass">
         <div class="sheet-handle"></div>
         <h2>Einstellungen <span class="room-name-label muted"></span></h2>
 
@@ -112,7 +116,7 @@
     <video id="remote-video" class="full-video" autoplay playsinline></video>
 
     <!-- eigene Kamera-Vorschau (klein), wenn Eltern Video senden -->
-    <video id="parent-self-video" class="pip hidden" autoplay playsinline muted></video>
+    <video id="parent-self-video" class="pip glass hidden" autoplay playsinline muted></video>
 
     <div id="parent-placeholder" class="placeholder">
       <div class="spinner"></div>
@@ -120,29 +124,32 @@
     </div>
 
     <div id="unmute-overlay" class="unmute-overlay hidden">
-      <p>🔇 Tippen, um den Ton einzuschalten</p>
+      <div class="unmute-box glass">🔇 Tippen, um den Ton einzuschalten</div>
     </div>
 
-    <div class="status-pill" id="parent-status">Verbinde…</div>
-    <button class="corner-btn" data-open="parent-menu">⚙︎</button>
+    <div class="top-chips">
+      <div class="status-pill glass" id="parent-status">Verbinde…</div>
+      <div class="presence-chip glass hidden" id="parent-presence"></div>
+    </div>
+    <button class="corner-btn glass" data-open="parent-menu">⚙︎</button>
 
     <!-- Untere Steuerleiste Eltern -->
     <div class="parent-controls">
-      <div class="volume-row">
+      <div class="volume-row glass">
         <span class="vol-icon">🔉</span>
         <input id="volume-slider" type="range" min="0" max="100" value="100" />
         <span class="vol-icon">🔊</span>
       </div>
       <div class="dock">
-        <button id="talk-btn" class="dock-btn talk"><span class="ic">🎤</span><span>Sprechen</span></button>
-        <button id="parent-video-btn" class="dock-btn"><span class="ic">📹</span><span>Mein Video</span></button>
-        <button class="dock-btn" data-open="parent-menu"><span class="ic">⚙︎</span><span>Steuern</span></button>
+        <button id="talk-btn" class="dock-btn glass talk"><span class="ic">🎤</span><span>Sprechen</span></button>
+        <button id="parent-video-btn" class="dock-btn glass"><span class="ic">📹</span><span>Mein Video</span></button>
+        <button class="dock-btn glass" data-open="parent-menu"><span class="ic">⚙︎</span><span>Steuern</span></button>
       </div>
     </div>
 
     <!-- Menü / Fernsteuerung Eltern -->
     <div id="parent-menu" class="sheet hidden">
-      <div class="sheet-inner">
+      <div class="sheet-inner glass">
         <div class="sheet-handle"></div>
         <h2>Babybett fernsteuern <span class="room-name-label muted"></span></h2>
 
@@ -174,9 +181,10 @@
 
   <!-- ===== Start-Tor: ein bewusster Tipp (iPhone braucht das für Kamera/Ton) ===== -->
   <div id="start-gate" class="start-gate hidden">
-    <div class="start-gate-box">
+    <div class="start-gate-box glass">
       <div class="brand"><span class="brand-icon">🌙</span><h1>Babyphone</h1></div>
       <p id="start-gate-text" class="muted"></p>
+      <p id="start-gate-presence" class="presence-line"></p>
       <button id="start-gate-btn" class="btn btn-primary btn-block btn-big">Starten</button>
       <button id="start-gate-home" class="btn btn-ghost btn-block">Zur Übersicht</button>
     </div>

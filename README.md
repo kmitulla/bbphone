@@ -19,7 +19,11 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
 - 🖥️ **Empfangen** zeigt das Video groß und bildschirmfüllend.
 - 🔊 **Großer Lautstärke-Regler** am Eltern-Gerät.
 - 🎤 **Eltern können sprechen** (Knopf „Sprechen"), das Kind-Gerät gibt die Stimme aus.
-- 📹 **Eltern-Video**: Eltern können ihre eigene Kamera anschalten, das Kind sieht sie eingeblendet.
+- 📹 **Eltern-Video**: Eltern können ihre eigene Kamera anschalten – das Kind-Gerät zeigt es **groß**;
+  bei mehreren Eltern automatisch als **Splitscreen**.
+- 🟢 **Anwesenheit**: In der Raumliste und im Raum wird angezeigt, ob schon ein Babybett (👶) oder
+  Eltern (👀) im Raum sind.
+- ✨ **Modernes „Liquid-Glass"-Design** (iOS-Stil, dunkel/nachttauglich), große Touch-Flächen.
 - 🎛️ **Fernsteuerung vom Eltern-Gerät**: Video des Kind-Geräts an/aus, Videoqualität,
   ob das Eltern-Video beim Kind sichtbar ist, und die Lautstärke der Elternstimme am Kind-Gerät.
 - 📊 **Videoqualität einstellbar** (Niedrig/Mittel/Hoch) – auch per Fernsteuerung, um Daten zu sparen.

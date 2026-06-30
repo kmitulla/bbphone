@@ -133,12 +133,16 @@ onAuthStateChanged(auth, (user) => {
    6) Raumliste (sichtbare Räume zum Antippen)
    =========================================================== */
 let roomListUnsub = null;
+let roomPresenceUnsubs = [];
 
 function startRoomListListener() {
   if (roomListUnsub) return;
   roomListUnsub = onSnapshot(collection(db, "rooms"), (snap) => {
     const list = $("room-list");
     const rooms = snap.docs.map(d => d.id).sort();
+    // alte Anwesenheits-Beobachter lösen
+    roomPresenceUnsubs.forEach(u => { try { u(); } catch (e) {} });
+    roomPresenceUnsubs = [];
     list.innerHTML = "";
     if (rooms.length === 0) {
       list.innerHTML = '<p class="muted" id="room-empty">Noch keine Räume. Erstelle unten einen.</p>';
@@ -147,17 +151,32 @@ function startRoomListListener() {
     rooms.forEach(name => {
       const item = document.createElement("div");
       item.className = "room-item";
-      item.innerHTML = `<span class="name">🚪 ${name}</span><button class="del" title="Raum löschen">🗑️</button>`;
+      item.innerHTML = `<span class="name">🚪 ${name}</span><span class="room-badge"></span><button class="del" title="Raum löschen">🗑️</button>`;
       item.querySelector(".name").addEventListener("click", () => selectRoom(name, item));
       item.querySelector(".del").addEventListener("click", (e) => {
         e.stopPropagation();
         if (confirm(`Raum "${name}" aus der Liste löschen?`)) deleteRoom(name);
       });
       list.appendChild(item);
+      // Anwesenheit pro Raum live anzeigen
+      const u = onSnapshot(collection(db, "rooms", name, "presence"), (psnap) => {
+        const c = countPresence(psnap.docs);
+        const badge = item.querySelector(".room-badge");
+        if (!badge) return;
+        const parts = [];
+        if (c.children > 0) parts.push('<span class="on">👶 aktiv</span>');
+        if (c.parents > 0) parts.push(`👀 ${c.parents}`);
+        badge.innerHTML = parts.join(" · ");
+      });
+      roomPresenceUnsubs.push(u);
     });
   });
 }
-function stopRoomListListener() { if (roomListUnsub) { roomListUnsub(); roomListUnsub = null; } }
+function stopRoomListListener() {
+  if (roomListUnsub) { roomListUnsub(); roomListUnsub = null; }
+  roomPresenceUnsubs.forEach(u => { try { u(); } catch (e) {} });
+  roomPresenceUnsubs = [];
+}
 
 function selectRoom(name, item) {
   $("room").value = name;
@@ -226,22 +245,38 @@ function handleUrlAutostart() {
   return false;
 }
 
+let gatePresenceUnsub = null;
+
 // Start-Tor zeigen: EIN bewusster Tipp – wichtig, damit das iPhone
 // danach Kamera/Mikrofon bzw. den Ton erlaubt (sonst schwarzer Bildschirm).
+// Zeigt außerdem an, wer schon im Raum ist.
 function showStartGate(room, mode) {
   pendingStart = { room, mode };
   $("start-gate-text").textContent =
     (mode === "send" ? "📡 Senden" : "👀 Empfangen") + " · Raum: " + room;
   $("start-gate-btn").textContent =
     mode === "send" ? "📡 Senden starten" : "👀 Empfangen starten";
+  $("start-gate-presence").textContent = "";
+  if (gatePresenceUnsub) { try { gatePresenceUnsub(); } catch (e) {} }
+  gatePresenceUnsub = onSnapshot(collection(db, "rooms", room, "presence"), (snap) => {
+    const c = countPresence(snap.docs);
+    const parts = [];
+    if (c.children > 0) parts.push("👶 Babybett ist aktiv");
+    if (c.parents > 0) parts.push(`👀 ${c.parents} Eltern dabei`);
+    $("start-gate-presence").textContent = parts.length ? parts.join("  ·  ") : "Noch niemand im Raum.";
+  });
   $("start-gate").classList.remove("hidden");
+}
+function hideStartGate() {
+  if (gatePresenceUnsub) { try { gatePresenceUnsub(); } catch (e) {} gatePresenceUnsub = null; }
+  $("start-gate").classList.add("hidden");
 }
 
 $("start-gate-btn").addEventListener("click", async () => {
   if (!pendingStart) return;
   const { room, mode } = pendingStart;
   pendingStart = null;
-  $("start-gate").classList.add("hidden");
+  hideStartGate();
   localStorage.setItem("babyphone_room", room);
   await ensureRoom(room);
   if (mode === "send") startChild(room);
@@ -249,7 +284,7 @@ $("start-gate-btn").addEventListener("click", async () => {
 });
 $("start-gate-home").addEventListener("click", () => {
   pendingStart = null;
-  $("start-gate").classList.add("hidden");
+  hideStartGate();
   if (location.search) history.replaceState(null, "", location.pathname);
   showScreen("home");
 });
@@ -330,6 +365,70 @@ async function setControl(patch) {
 }
 
 /* ===========================================================
+   10b) Anwesenheit – wer ist gerade als Kind/Eltern im Raum?
+   =========================================================== */
+// Stabile Geräte-Kennung, damit keine Karteileichen übrig bleiben.
+let myDeviceId = localStorage.getItem("babyphone_device_id");
+if (!myDeviceId) {
+  myDeviceId = "d" + Math.random().toString(36).slice(2, 12);
+  localStorage.setItem("babyphone_device_id", myDeviceId);
+}
+
+let presenceUnsub = null;
+let presenceTimer = null;
+const PRESENCE_FRISCH_MS = 45000;   // so lange gilt ein Eintrag als "anwesend"
+
+// Eigene Anwesenheit melden (mit regelmäßigem "Herzschlag") + Raum beobachten.
+async function startPresence(room, role) {
+  stopPresenceHeartbeat();
+  const ref = doc(db, "rooms", room, "presence", myDeviceId);
+  const beat = () => setDoc(ref, { role, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
+  await beat();
+  presenceTimer = setInterval(beat, 20000);
+  presenceUnsub = onSnapshot(collection(db, "rooms", room, "presence"), (snap) => {
+    updatePresenceUI(countPresence(snap.docs));
+  });
+}
+function stopPresenceHeartbeat() {
+  if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
+  if (presenceUnsub) { try { presenceUnsub(); } catch (e) {} presenceUnsub = null; }
+}
+function stopPresence(room) {
+  stopPresenceHeartbeat();
+  if (room) deleteDoc(doc(db, "rooms", room, "presence", myDeviceId)).catch(() => {});
+}
+
+// Frische Anwesenheits-Einträge nach Rolle zählen.
+function countPresence(docs) {
+  const now = Date.now();
+  let children = 0, parents = 0, otherParents = 0;
+  docs.forEach(d => {
+    const data = d.data();
+    const ts = data.updatedAt && data.updatedAt.toMillis ? data.updatedAt.toMillis() : now;
+    if (now - ts > PRESENCE_FRISCH_MS) return;        // veraltet -> ignorieren
+    if (data.role === "send") children++;
+    else if (data.role === "receive") { parents++; if (d.id !== myDeviceId) otherParents++; }
+  });
+  return { children, parents, otherParents };
+}
+
+// Anwesenheit im laufenden Betrieb anzeigen.
+function updatePresenceUI(c) {
+  if (!currentSession) return;
+  if (currentSession.mode === "send") {
+    const el = $("child-presence");
+    el.textContent = c.parents > 0 ? `👀 ${c.parents} Eltern im Raum` : "👀 Noch keine Eltern";
+    el.classList.remove("hidden");
+  } else {
+    const el = $("parent-presence");
+    const parts = [c.children > 0 ? "👶 Babybett aktiv" : "👶 Babybett wartet…"];
+    if (c.otherParents > 0) parts.push(`👀 +${c.otherParents}`);
+    el.textContent = parts.join("  ·  ");
+    el.classList.remove("hidden");
+  }
+}
+
+/* ===========================================================
    11) KIND-GERÄT (Babybett) – sendet Ton + Video
    =========================================================== */
 let localStream = null;            // Kamera + Mikro des Kind-Geräts
@@ -364,6 +463,7 @@ async function startChild(roomName) {
   // Kontrolle übernehmen / anwenden (Qualität, Video an/aus, …)
   $("child-quality-select").value = control.quality;
   listenControl(roomName, applyControlOnChild);
+  startPresence(roomName, "send");
 
   setStatus("child-status", "Bereit, warte auf Eltern…", "connecting");
   await cleanupOldConnections(roomName);
@@ -394,7 +494,7 @@ async function createChildPeer(roomName, connId) {
   try { await audioTx.sender.replaceTrack(localStream.getAudioTracks()[0]); } catch (e) {}
 
   // Eingehende Eltern-Spuren (Stimme + evtl. Video) anzeigen/abspielen:
-  pc.ontrack = (e) => attachParentMedia(connId, e.streams[0]);
+  pc.ontrack = (e) => attachParentTrack(connId, e.track);
 
   const connRef = doc(db, "rooms", roomName, "connections", connId);
   const callerCandidates = collection(connRef, "callerCandidates");
@@ -427,7 +527,7 @@ function closeChildPeer(connId) {
   try { pc._unsubCand && pc._unsubCand(); } catch (e) {}
   try { pc.close(); } catch (e) {}
   childPeers.delete(connId);
-  removeParentMedia(connId);
+  removeParentTile(connId);
   updateChildStatus();
 }
 
@@ -438,46 +538,59 @@ function updateChildStatus() {
   else setStatus("child-status", "Bereit, warte auf Eltern…", "connecting");
 }
 
-/* Eltern-Medien auf dem Kind-Gerät (Stimme immer hörbar, Video je nach Einstellung) */
-function attachParentMedia(connId, stream) {
-  const pip = $("parent-pip");
-  let el = pip.querySelector(`[data-conn="${connId}"]`);
-  if (!el) {
-    el = document.createElement("video");
-    el.dataset.conn = connId;
-    el.autoplay = true; el.playsInline = true;
-    pip.appendChild(el);
+/* ===== Eltern-Medien auf dem Kind-Gerät: große Bühne + Splitscreen =====
+   Wichtig: wir hängen die EINZELNE Spur (e.track) an einen eigenen Stream pro
+   Verbindung. So funktioniert es zuverlässig, auch wenn die Eltern Video erst
+   später dazuschalten (replaceTrack ohne Neuverhandlung). */
+const parentTiles = new Map();   // connId -> { stream, el }
+
+function attachParentTrack(connId, track) {
+  let entry = parentTiles.get(connId);
+  if (!entry) {
+    const stream = new MediaStream();
+    const el = document.createElement("video");
+    el.className = "parent-tile empty";
+    el.autoplay = true; el.playsInline = true; el.dataset.conn = connId;
+    el.srcObject = stream;
+    $("parent-stage").appendChild(el);
+    entry = { stream, el };
+    parentTiles.set(connId, entry);
   }
-  el.srcObject = stream;
-  el.volume = control.childVolume / 100;
-  el.play().catch(() => {});
-  // Reden die Eltern? (Audiospur vorhanden und nicht stumm)
-  watchParentAudio(stream);
-  refreshParentPip();
+  if (!entry.stream.getTracks().some(t => t.id === track.id)) entry.stream.addTrack(track);
+  entry.el.volume = control.childVolume / 100;
+  entry.el.play().catch(() => {});
+  // Wenn sich die Spur ein-/ausschaltet (Eltern-Video an/aus, Sprechen): Bühne neu rechnen.
+  track.onunmute = updateParentStage;
+  track.onmute = updateParentStage;
+  track.onended = updateParentStage;
+  updateParentStage();
 }
-function removeParentMedia(connId) {
-  const el = $("parent-pip").querySelector(`[data-conn="${connId}"]`);
-  if (el) el.remove();
-  refreshParentPip();
+function removeParentTile(connId) {
+  const entry = parentTiles.get(connId);
+  if (entry) { try { entry.el.remove(); } catch (e) {} parentTiles.delete(connId); }
+  updateParentStage();
 }
-function refreshParentPip() {
-  const pip = $("parent-pip");
-  const hasVideo = [...pip.querySelectorAll("video")].some(v => {
-    const s = v.srcObject; return s && s.getVideoTracks().some(t => t.readyState === "live" && !t.muted);
+function tileHasLiveVideo(entry) {
+  return entry.stream.getVideoTracks().some(t => t.readyState === "live" && !t.muted);
+}
+function anyParentTalking() {
+  for (const e of parentTiles.values())
+    if (e.stream.getAudioTracks().some(t => t.readyState === "live" && !t.muted)) return true;
+  return false;
+}
+// Bühne zeichnen: jede Verbindung mit aktivem Eltern-Video bekommt eine Kachel.
+function updateParentStage() {
+  const stage = $("parent-stage");
+  let active = 0;
+  parentTiles.forEach(entry => {
+    const show = control.showParentVideoOnChild && tileHasLiveVideo(entry);
+    entry.el.classList.toggle("empty", !show);   // Audio läuft auch ausgeblendet weiter
+    entry.el.volume = control.childVolume / 100;
+    if (show) active++;
   });
-  pip.classList.toggle("hidden", !(control.showParentVideoOnChild && hasVideo));
-}
-function watchParentAudio(stream) {
-  const a = stream.getAudioTracks()[0];
-  if (!a) return;
-  const update = () => {
-    const talking = !a.muted;
-    $("parent-talking").classList.toggle("hidden", !talking);
-  };
-  a.onmute = update; a.onunmute = update; update();
-  // PiP-Sichtbarkeit auch bei Video-Änderungen aktualisieren
-  const v = stream.getVideoTracks()[0];
-  if (v) { v.onmute = refreshParentPip; v.onunmute = refreshParentPip; }
+  stage.className = "parent-stage" + (active ? " tiles-" + Math.min(active, 4) : "");
+  if (active === 0) stage.classList.add("hidden");
+  $("parent-talking").classList.toggle("hidden", !anyParentTalking());
 }
 
 /* Fernsteuerung auf dem Kind-Gerät anwenden */
@@ -491,10 +604,8 @@ async function applyControlOnChild() {
   // Qualität:
   if (childVideoTrack) { try { await childVideoTrack.applyConstraints(QUALITY[control.quality]); } catch (e) {} }
   $("child-quality-select").value = control.quality;
-  // Lautstärke der Eltern-Stimme:
-  $("parent-pip").querySelectorAll("video").forEach(v => v.volume = control.childVolume / 100);
-  // Eltern-Video sichtbar?
-  refreshParentPip();
+  // Eltern-Bühne (Lautstärke + Sichtbarkeit) aktualisieren:
+  updateParentStage();
   // Knopf-Status "Video"
   $("child-video-toggle").classList.toggle("active", control.childVideoEnabled);
 }
@@ -578,6 +689,7 @@ async function startParent(roomName) {
 
   // Fernsteuer-Bedienelemente mit aktuellen Werten füllen + Änderungen hören
   listenControl(roomName, syncRemoteControlsUI);
+  startPresence(roomName, "receive");
 
   connectParent(roomName);
 }
@@ -756,11 +868,16 @@ function stopEverything() {
   $("screen-off-curtain").classList.add("hidden");
   $("unmute-overlay").classList.add("hidden");
   $("parent-talking").classList.add("hidden");
-  $("start-gate").classList.add("hidden");
+  hideStartGate();
   pendingStart = null;
-  $("parent-pip").innerHTML = "";
+  $("parent-stage").innerHTML = "";
+  $("parent-stage").classList.add("hidden");
+  parentTiles.clear();
+  $("child-presence").classList.add("hidden");
+  $("parent-presence").classList.add("hidden");
 
   if (controlUnsub) { try { controlUnsub(); } catch (e) {} controlUnsub = null; }
+  stopPresence(room);
 
   // Kind stoppen
   if (childUnsub) { try { childUnsub(); } catch (e) {} childUnsub = null; }
@@ -796,4 +913,5 @@ window.addEventListener("pagehide", () => {
   if (!room) return;
   if (parentConnId) deleteConnectionDoc(room, parentConnId);
   childPeers.forEach((pc, id) => deleteConnectionDoc(room, id));
+  deleteDoc(doc(db, "rooms", room, "presence", myDeviceId)).catch(() => {});
 });
