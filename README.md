@@ -13,17 +13,26 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
 ## Was kann die App?
 
 - 🔐 **Anmelden** mit E-Mail + Passwort (über Firebase). Nutzer legst du selbst in der Firebase-Konsole an.
-- 🏠 **Feste Räume**: Gleicher Raumname = die Geräte finden sich.
+- 🏠 **Sichtbare Raumliste**: Beide Geräte tippen einfach denselben Raum an – kein Vertippen mehr.
 - 🔗 **Lesezeichen-Links**: Ein Tipp genügt (z.B. `?room=kinderzimmer&mode=send`).
+- 📱 **Als App speichern**: Eigenes App-Icon, lässt sich aufs iPhone-Startbild legen.
 - 🖥️ **Empfangen** zeigt das Video groß und bildschirmfüllend.
-- 🔊 **Großer Lautstärke-Regler**.
-- 🚫 **Kein versehentliches Auflegen** – Beenden nur über das kleine Menü oben in der Ecke + Nachfrage.
+- 🔊 **Großer Lautstärke-Regler** am Eltern-Gerät.
+- 🎤 **Eltern können sprechen** (Knopf „Sprechen"), das Kind-Gerät gibt die Stimme aus.
+- 📹 **Eltern-Video**: Eltern können ihre eigene Kamera anschalten, das Kind sieht sie eingeblendet.
+- 🎛️ **Fernsteuerung vom Eltern-Gerät**: Video des Kind-Geräts an/aus, Videoqualität,
+  ob das Eltern-Video beim Kind sichtbar ist, und die Lautstärke der Elternstimme am Kind-Gerät.
+- 📊 **Videoqualität einstellbar** (Niedrig/Mittel/Hoch) – auch per Fernsteuerung, um Daten zu sparen.
+- 🔄 **Alle Kameras wählbar** (z.B. alle iPhone-Kameras) + Schnell-Umschalter Front/Rück.
+- 🚫 **Kein versehentliches Auflegen** – Beenden nur über das Menü (⚙︎ oben links) + Nachfrage.
 - 🔁 **Automatisch neu verbinden**, wenn das WLAN kurz weg ist.
 - ☀️ **Bildschirm bleibt an** (Wake Lock), solange die Babyphone-Ansicht offen ist.
-- 🌙 **„Bildschirm aus"** am Babybett-Handy (schwarzer Bildschirm, Ton + Video laufen weiter, spart Akku).
-- 🔄 **Kamera umschalten** (Front/Rück) am Sender.
-- 👨‍👩‍👧 **Mehrere Empfänger** gleichzeitig im selben Raum möglich.
+- 🌙 **„Display aus"** am Babybett-Handy (schwarzer Bildschirm, Ton + Video laufen weiter, spart Akku).
+- 👨‍👩‍👧 **Mehrere Eltern-Geräte** gleichzeitig im selben Raum möglich.
 - 🟢 **Statusanzeige**: „Verbunden" / „Verbinde…" / „Getrennt, versuche erneut…".
+
+> **Hinweis zur Anmeldung:** Beide Geräte müssen angemeldet sein, aber **nicht zwingend mit
+> demselben Konto**. Wichtig ist nur derselbe **Raum**.
 
 ---
 
@@ -32,12 +41,41 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
 | Datei | Wozu |
 |---|---|
 | `index.html` | Die Seite selbst (Knöpfe, Video, Felder). |
-| `styles.css` | Das Aussehen (dunkel, große Knöpfe). |
-| `app.js` | Die Logik (Anmelden, Räume, Video senden/empfangen). |
+| `styles.css` | Das Aussehen (dunkel, modern). |
+| `app.js` | Die Logik (Anmelden, Räume, Video senden/empfangen, Fernsteuerung). |
 | `firestore.rules` | Die Sicherheitsregeln für die Datenbank. |
+| `manifest.json` + `icons/` | App-Icon und Name fürs Speichern auf dem Startbildschirm. |
 | `README.md` | Diese Anleitung. |
 
 Deine Firebase-Config steckt **schon eingesetzt** oben in `app.js`.
+
+---
+
+## So bedienst du es (Kurzfassung)
+
+1. Beide Geräte **anmelden**.
+2. Auf der Startseite einen **Raum anlegen** (Name eingeben → „+ Anlegen") oder in der **Raumliste** antippen.
+3. **Babybett-Handy:** Raum wählen → **SENDEN**. **Eltern-Gerät:** denselben Raum → **EMPFANGEN**.
+
+**Am Babybett (Kind-Gerät):**
+- ⚙︎ oben links: **Kamera** auswählen (alle iPhone-Kameras) und **Videoqualität**.
+- Unten: 🔄 Kamera (Front/Rück), 📷 Video an/aus, 🌙 Display aus (läuft weiter).
+
+**Am Eltern-Gerät:**
+- Unten Mitte: **Lautstärke-Regler**.
+- 🎤 **Sprechen** antippen → das Kind hört eure Stimme (nochmal tippen = aus).
+- 📹 **Mein Video** antippen → das Kind sieht eure Kamera eingeblendet.
+- ⚙︎ **Steuern**: das Babybett fernsteuern – Video an/aus, Qualität (Daten sparen),
+  euer Video beim Kind zeigen/verbergen, Lautstärke eurer Stimme am Kind-Gerät.
+
+---
+
+## Als App auf dem iPhone speichern
+
+1. Öffne die App-Adresse in **Safari**.
+2. Tippe unten auf **Teilen** (Quadrat mit Pfeil).
+3. **„Zum Home-Bildschirm"** wählen → **Hinzufügen**.
+4. Jetzt liegt das **Babyphone-Icon** auf dem Startbildschirm und öffnet wie eine echte App.
 
 ---
 
@@ -199,7 +237,7 @@ Teste in dieser Reihenfolge:
 
 ### Schritt 1: Beide Geräte im selben WLAN
 - [ ] Auf beiden Geräten die App-Adresse öffnen und **anmelden**.
-- [ ] Gleichen **Raumnamen** auf beiden eingeben (z.B. `test`).
+- [ ] Auf einem Gerät einen **Raum anlegen** (z.B. `test`). Auf dem anderen erscheint er in der **Raumliste** – antippen.
 - [ ] Gerät 1: **SENDEN** – Kamera + Mikro erlauben.
 - [ ] Gerät 2: **EMPFANGEN** – Bild und Ton sollten erscheinen.
 - [ ] Status zeigt **„Verbunden"**.
@@ -207,12 +245,18 @@ Teste in dieser Reihenfolge:
 - [ ] Falls „Tippen, um den Ton einzuschalten" erscheint: einmal antippen.
 
 ### Schritt 2: Funktionen prüfen
-- [ ] **Kamera umschalten** (Front/Rück) am Sender.
-- [ ] **„Bildschirm aus"** am Sender – Ton/Video laufen beim Empfänger weiter.
-- [ ] Empfänger-Bildschirm geht **nicht** von selbst aus (Wake Lock).
-- [ ] **Zweites Empfänger-Gerät** dazu – beide sehen gleichzeitig das Bild.
-- [ ] WLAN am Empfänger kurz aus/an – es verbindet sich **automatisch neu**.
-- [ ] **Beenden** nur über das Menü (☰ oben in der Ecke) + Nachfrage.
+- [ ] **Kamera-Auswahl** (⚙︎) am Kind-Gerät – alle Kameras werden gelistet.
+- [ ] **Kamera umschalten** (🔄 Front/Rück) am Kind-Gerät.
+- [ ] **Videoqualität** umstellen (am Kind-Gerät und per Fernsteuerung am Eltern-Gerät).
+- [ ] **🎤 Sprechen** am Eltern-Gerät – das Kind-Gerät zeigt „Eltern sprechen…" und gibt die Stimme aus.
+- [ ] **📹 Mein Video** am Eltern-Gerät – das Kind-Gerät blendet das Eltern-Video ein.
+- [ ] **⚙︎ Steuern**: Video des Kind-Geräts an/aus, Eltern-Video zeigen/verbergen, Lautstärke der Elternstimme.
+- [ ] **„Display aus"** am Kind-Gerät – Ton/Video laufen beim Eltern-Gerät weiter.
+- [ ] Eltern-Bildschirm geht **nicht** von selbst aus (Wake Lock).
+- [ ] **Zweites Eltern-Gerät** dazu – beide sehen gleichzeitig das Bild.
+- [ ] WLAN am Eltern-Gerät kurz aus/an – es verbindet sich **automatisch neu**.
+- [ ] **Beenden** nur über das Menü (⚙︎ oben links) + Nachfrage.
+- [ ] (iPhone) Über Safari **„Zum Home-Bildschirm"** – Icon erscheint, App öffnet im Vollbild.
 
 ### Schritt 3: Über VPN testen
 - [ ] Beide Geräte ins **VPN** einbuchen (verschiedene Netze/Standorte sind ok).

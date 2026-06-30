@@ -1,330 +1,214 @@
 /* ===========================================================
-   Babyphone – Design
-   Dunkel (nachttauglich), große Knöpfe, gut fürs Handy.
+   Babyphone – modernes, cleanes Design (dunkel/nachttauglich)
    =========================================================== */
 
-* {
-  box-sizing: border-box;
-  -webkit-tap-highlight-color: transparent;
+:root {
+  --bg: #0b1020;
+  --bg-2: #131a2e;
+  --card: #161d33;
+  --card-2: #1d263f;
+  --text: #eef1f8;
+  --muted: #9aa4bf;
+  --line: #2a3450;
+  --accent: #6366f1;   /* indigo */
+  --green: #22c55e;
+  --blue: #3b82f6;
+  --red: #ef4444;
+  --radius: 18px;
 }
 
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
 html, body {
-  margin: 0;
-  padding: 0;
-  height: 100%;
-  background: #000;
-  color: #f2f2f2;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 18px;
+  margin: 0; padding: 0; height: 100%;
+  background: radial-gradient(120% 80% at 50% 0%, #182143 0%, var(--bg) 60%);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+  font-size: 17px; line-height: 1.4;
   overscroll-behavior: none;
 }
 
-/* Jeder "Bildschirm" füllt die ganze Seite. Nur der aktive ist sichtbar. */
-.screen {
-  display: none;
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.screen.active {
-  display: block;
-}
+.screen { display: none; position: fixed; inset: 0; }
+.screen.active { display: block; }
 
-/* Zentrierte Box für Anmelden / Start */
-.center-box {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  max-width: 480px;
-  height: max-content;
-  max-height: 100%;
+/* ---------- Karten (Anmelden / Start) ---------- */
+.card {
+  position: absolute; inset: 0; margin: auto;
+  width: min(100%, 460px); height: max-content; max-height: 100%;
   overflow-y: auto;
-  padding: 24px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+  padding: 26px 22px calc(26px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column;
+  -webkit-overflow-scrolling: touch;
 }
 
-h1 {
-  font-size: 30px;
-  text-align: center;
-  margin: 0 0 4px;
-}
-.subtitle {
-  text-align: center;
-  color: #9aa0a6;
-  margin: 0 0 24px;
-}
-.top-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 16px;
-}
-.top-row h1 { text-align: left; margin: 0; }
+.brand { display: flex; align-items: center; gap: 10px; justify-content: center; }
+.brand.small { justify-content: flex-start; }
+.brand-icon { font-size: 26px; }
+.brand h1 { font-size: 26px; margin: 0; font-weight: 700; letter-spacing: -0.3px; }
+.subtitle { text-align: center; color: var(--muted); margin: 6px 0 22px; }
 
-.field-label {
-  font-size: 15px;
-  color: #9aa0a6;
-  margin: 14px 0 6px;
-}
+.topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.section-title { font-size: 15px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin: 6px 0 10px; }
 
-input[type="email"],
-input[type="password"],
-input[type="text"] {
-  width: 100%;
-  padding: 16px;
-  font-size: 18px;
-  border: 2px solid #333;
-  border-radius: 12px;
-  background: #1a1a1a;
-  color: #fff;
-}
-input:focus {
-  outline: none;
-  border-color: #4a90d9;
-}
+.field-label { font-size: 14px; color: var(--muted); margin: 14px 0 6px; }
 
-/* Große Knöpfe */
-.big-btn {
-  width: 100%;
-  padding: 22px;
-  margin-top: 16px;
-  font-size: 22px;
-  font-weight: 700;
-  border: none;
-  border-radius: 16px;
-  color: #fff;
-  background: #2a2a2a;
-  cursor: pointer;
-  line-height: 1.3;
+input[type="email"], input[type="password"], input[type="text"], .select {
+  width: 100%; padding: 15px 16px; font-size: 17px;
+  border: 1px solid var(--line); border-radius: 14px;
+  background: var(--card); color: var(--text); appearance: none;
 }
-.big-btn:active { transform: scale(0.98); }
-.btn-sub {
-  font-size: 15px;
-  font-weight: 400;
-  opacity: 0.85;
-}
+input:focus, .select:focus { outline: none; border-color: var(--accent); }
+.select { background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239aa4bf' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 40px; }
 
-.big-btn.primary { background: #4a90d9; }
-.big-btn.send    { background: #2e7d32; }   /* grün = senden */
-.big-btn.receive { background: #1565c0; }   /* blau = empfangen */
-.big-btn.danger  { background: #c62828; }   /* rot = beenden */
+.row { display: flex; gap: 10px; align-items: stretch; }
+.row input { flex: 1; }
 
-.text-btn {
-  background: none;
-  border: none;
-  color: #9aa0a6;
-  font-size: 16px;
-  cursor: pointer;
-  padding: 8px;
+/* ---------- Knöpfe ---------- */
+.btn {
+  border: none; border-radius: 14px; color: #fff; cursor: pointer;
+  font-size: 17px; font-weight: 600; padding: 14px 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform .06s ease, opacity .15s ease;
 }
+.btn:active { transform: scale(0.97); }
+.btn:disabled { opacity: .5; }
+.btn-block { width: 100%; }
+.btn-sm { padding: 9px 14px; font-size: 15px; }
+.btn-big { flex-direction: column; padding: 20px; margin-top: 14px; font-size: 21px; font-weight: 700; }
+.btn-sub { font-size: 13px; font-weight: 400; opacity: .85; margin-top: 4px; }
 
-.hint {
-  font-size: 14px;
-  color: #777;
-  margin: 10px 0 0;
-}
-.error-text {
-  color: #ff6b6b;
-  min-height: 22px;
-  margin: 12px 0 0;
-  text-align: center;
-}
+.btn-primary { background: var(--accent); }
+.btn-green   { background: linear-gradient(180deg,#2dd36f,#16a34a); }
+.btn-blue    { background: linear-gradient(180deg,#4f8df9,#2563eb); }
+.btn-danger  { background: var(--red); margin-top: 8px; }
+.btn-soft    { background: var(--card-2); border: 1px solid var(--line); }
+.btn-ghost   { background: transparent; color: var(--muted); }
 
-/* ===== Video, das den ganzen Bildschirm füllt ===== */
-.full-video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;   /* ganzes Bild zeigen, nichts abschneiden */
-  background: #000;
-}
+.hint { font-size: 13px; color: #6b7596; margin: 10px 0 0; }
+.muted { color: var(--muted); }
+.error-text { color: #fca5a5; min-height: 20px; margin: 12px 0 0; text-align: center; }
 
-/* Statusanzeige oben */
+/* ---------- Raumliste ---------- */
+.room-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 6px; }
+.room-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-radius: 14px;
+  background: var(--card); border: 1px solid var(--line); cursor: pointer;
+}
+.room-item.selected { border-color: var(--accent); background: var(--card-2); }
+.room-item .name { font-weight: 600; }
+.room-item .del { background: none; border: none; color: var(--muted); font-size: 20px; padding: 4px 8px; cursor: pointer; }
+
+/* ---------- Vollbild-Video ---------- */
+.full-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
+
+/* kleines eingeblendetes Video (PiP) */
+.pip {
+  position: absolute; right: 12px;
+  top: calc(env(safe-area-inset-top,0px) + 64px);
+  width: 33vw; max-width: 180px; aspect-ratio: 3/4;
+  border-radius: 14px; overflow: hidden; z-index: 22;
+  border: 2px solid rgba(255,255,255,.25); background: #000;
+  box-shadow: 0 6px 20px rgba(0,0,0,.5);
+}
+.pip video, #parent-pip video { width: 100%; height: 100%; object-fit: cover; }
+#parent-self-video { object-fit: cover; }
+
+/* ---------- Statusanzeige ---------- */
 .status-pill {
-  position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 12px);
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0,0,0,0.6);
-  padding: 8px 18px;
-  border-radius: 999px;
-  font-size: 15px;
-  z-index: 20;
-  white-space: nowrap;
+  position: absolute; top: calc(env(safe-area-inset-top,0px) + 12px);
+  left: 50%; transform: translateX(-50%);
+  background: rgba(10,14,28,.7); backdrop-filter: blur(8px);
+  padding: 8px 16px; border-radius: 999px; font-size: 14px; z-index: 20;
+  white-space: nowrap; border: 1px solid var(--line);
 }
-.status-pill.connected   { background: rgba(46,125,50,0.85); }
-.status-pill.connecting  { background: rgba(245,166,35,0.85); }
-.status-pill.disconnected{ background: rgba(198,40,40,0.85); }
+.status-pill.connected    { background: rgba(22,163,74,.85); border-color: transparent; }
+.status-pill.connecting   { background: rgba(217,119,6,.85); border-color: transparent; }
+.status-pill.disconnected { background: rgba(220,38,38,.85); border-color: transparent; }
 
-/* Menü-Knopf in der Ecke (oben links, schwer versehentlich zu treffen beim Schauen) */
+/* ---------- Ecken-Knopf ---------- */
 .corner-btn {
-  position: absolute;
-  top: calc(env(safe-area-inset-top, 0px) + 8px);
-  left: 8px;
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  border: none;
-  background: rgba(0,0,0,0.45);
-  color: #fff;
-  font-size: 22px;
-  z-index: 30;
-  cursor: pointer;
+  position: absolute; top: calc(env(safe-area-inset-top,0px) + 8px); left: 10px;
+  width: 46px; height: 46px; border-radius: 14px; border: none;
+  background: rgba(10,14,28,.55); backdrop-filter: blur(8px);
+  color: #fff; font-size: 20px; z-index: 30; cursor: pointer;
 }
 
-/* Untere Bedienleiste (Sender) */
-.control-bar {
-  position: absolute;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-  z-index: 20;
+/* ---------- Untere Leisten (Dock) ---------- */
+.dock {
+  display: flex; justify-content: center; gap: 10px; padding: 4px;
 }
-.ctrl-btn {
-  background: rgba(0,0,0,0.55);
-  border: none;
-  color: #fff;
-  border-radius: 14px;
-  padding: 12px 18px;
-  font-size: 14px;
-  line-height: 1.4;
-  cursor: pointer;
+.dock-btn {
+  flex: 1; max-width: 140px;
+  background: rgba(10,14,28,.6); backdrop-filter: blur(10px);
+  border: 1px solid var(--line); color: #fff; border-radius: 16px;
+  padding: 12px 8px; font-size: 13px; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
 }
-.ctrl-btn:active { transform: scale(0.97); }
+.dock-btn .ic { font-size: 22px; }
+.dock-btn:active { transform: scale(0.97); }
+.dock-btn.active { background: var(--accent); border-color: transparent; }
+.dock-btn.talk.active { background: var(--green); }
 
-/* Lautstärke-Regler (Empfänger) */
-.volume-bar {
-  position: absolute;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(90%, 460px);
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  background: rgba(0,0,0,0.5);
-  padding: 12px 20px;
-  border-radius: 999px;
-  z-index: 20;
-}
-.vol-icon { font-size: 22px; }
+.dock { position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom,0px) + 14px); z-index: 20; }
 
-#volume-slider {
-  flex: 1;
-  height: 38px;
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
+/* Eltern-Steuerleiste (Lautstärke + Dock zusammen) */
+.parent-controls {
+  position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom,0px) + 14px);
+  z-index: 20; display: flex; flex-direction: column; gap: 10px; padding: 0 12px;
 }
-#volume-slider::-webkit-slider-runnable-track {
-  height: 8px;
-  border-radius: 4px;
-  background: #555;
+.parent-controls .dock { position: static; }
+.volume-row {
+  display: flex; align-items: center; gap: 12px;
+  background: rgba(10,14,28,.6); backdrop-filter: blur(10px);
+  border: 1px solid var(--line); border-radius: 999px; padding: 8px 16px;
+  max-width: 460px; width: 100%; margin: 0 auto;
 }
-#volume-slider::-moz-range-track {
-  height: 8px;
-  border-radius: 4px;
-  background: #555;
-}
-#volume-slider::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 34px;
-  height: 34px;
-  margin-top: -13px;
-  border-radius: 50%;
-  background: #fff;
-  border: none;
-}
-#volume-slider::-moz-range-thumb {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: #fff;
-  border: none;
+.vol-icon { font-size: 20px; }
+
+input[type="range"] { flex: 1; height: 34px; -webkit-appearance: none; appearance: none; background: transparent; }
+input[type="range"]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: #3a4566; }
+input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: #3a4566; }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; margin-top: -11px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0,0,0,.4); }
+input[type="range"]::-moz-range-thumb { width: 28px; height: 28px; border-radius: 50%; background: #fff; border: none; }
+.wide-range { width: 100%; }
+
+/* ---------- Sprech-Anzeige (Kind) ---------- */
+.talk-indicator {
+  position: absolute; bottom: calc(env(safe-area-inset-bottom,0px) + 90px);
+  left: 50%; transform: translateX(-50%); z-index: 25;
+  background: rgba(34,197,94,.9); padding: 10px 18px; border-radius: 999px; font-weight: 600;
 }
 
-/* Schwarzer "Bildschirm aus"-Vorhang */
-.curtain {
-  position: absolute;
-  inset: 0;
-  background: #000;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  color: #333;        /* sehr dezent, spart Strom auf OLED */
-  font-size: 15px;
-  padding: 24px;
-}
+/* ---------- Vorhang / Platzhalter / Overlays ---------- */
+.curtain { position: absolute; inset: 0; background: #000; z-index: 40; display: flex; align-items: center; justify-content: center; text-align: center; color: #2a2a2a; font-size: 14px; padding: 24px; }
 
-/* Platzhalter (Empfänger, noch kein Bild) */
-.placeholder {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 20px;
-  background: #000;
-  z-index: 10;
-  text-align: center;
-  padding: 24px;
-  color: #aaa;
-}
-.spinner {
-  width: 54px;
-  height: 54px;
-  border: 5px solid #333;
-  border-top-color: #4a90d9;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
+.placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: var(--bg); z-index: 10; text-align: center; padding: 24px; color: var(--muted); }
+.spinner { width: 52px; height: 52px; border: 5px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Tippen-zum-Ton Overlay */
-.unmute-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0,0,0,0.55);
-  z-index: 25;
-  font-size: 20px;
-  text-align: center;
-  padding: 24px;
-}
+.unmute-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.55); z-index: 26; font-size: 19px; text-align: center; padding: 24px; }
 
-/* Menü-Overlay */
-.menu-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(0,0,0,0.8);
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
+/* ---------- Bottom Sheet (Menü/Einstellungen) ---------- */
+.sheet { position: absolute; inset: 0; background: rgba(0,0,0,.55); z-index: 50; display: flex; align-items: flex-end; }
+.sheet-inner {
+  width: 100%; max-height: 88%; overflow-y: auto;
+  background: var(--bg-2); border-radius: 22px 22px 0 0;
+  padding: 12px 20px calc(24px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
 }
-.menu-box {
-  width: 100%;
-  max-width: 380px;
-  background: #1a1a1a;
-  border-radius: 18px;
-  padding: 24px;
-}
-.menu-box h2 { margin: 0 0 8px; text-align: center; }
-.menu-info { text-align: center; color: #9aa0a6; margin: 0 0 12px; }
+.sheet-handle { width: 44px; height: 5px; border-radius: 3px; background: #3a4566; margin: 6px auto 14px; }
+.sheet-inner h2 { font-size: 19px; margin: 0 0 14px; }
+.sheet .btn-block { margin-top: 10px; }
 
-/* Hilfsklasse zum Aus-/Einblenden */
+.ctrl-row { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--line); }
+
+/* iOS-Schalter */
+.switch { position: relative; display: inline-block; width: 52px; height: 31px; flex: none; }
+.switch input { display: none; }
+.switch .slider { position: absolute; inset: 0; background: #3a4566; border-radius: 999px; transition: .2s; }
+.switch .slider::before { content: ""; position: absolute; width: 25px; height: 25px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+.switch input:checked + .slider { background: var(--green); }
+.switch input:checked + .slider::before { transform: translateX(21px); }
+
 .hidden { display: none !important; }

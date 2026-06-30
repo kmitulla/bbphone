@@ -2,18 +2,28 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8" />
-  <!-- Damit es auf dem Handy gut aussieht und nicht zoomt -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#000000" />
+  <meta name="theme-color" content="#0b1020" />
+
+  <!-- Damit es sich als Web-App vom iPhone-Startbildschirm wie eine App anfühlt -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Babyphone" />
+
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-180.png" />
+  <link rel="icon" href="favicon.ico" />
+
   <title>Babyphone</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
 
-  <!-- ================== ANMELDE-BILDSCHIRM ================== -->
+  <!-- ================== ANMELDEN ================== -->
   <section id="login-screen" class="screen active">
-    <div class="center-box">
-      <h1>👶 Babyphone</h1>
+    <div class="card">
+      <div class="brand"><span class="brand-icon">🌙</span><h1>Babyphone</h1></div>
       <p class="subtitle">Bitte anmelden</p>
 
       <label class="field-label" for="email">E-Mail</label>
@@ -22,101 +32,146 @@
       <label class="field-label" for="password">Passwort</label>
       <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
 
-      <button id="login-btn" class="big-btn primary">Anmelden</button>
+      <button id="login-btn" class="btn btn-primary btn-block">Anmelden</button>
       <p id="login-error" class="error-text"></p>
-      <p class="hint">Neue Nutzer werden in der Firebase-Konsole angelegt.</p>
+      <p class="hint">Nutzer werden in der Firebase-Konsole angelegt.</p>
     </div>
   </section>
 
-  <!-- ================== START-BILDSCHIRM ================== -->
+  <!-- ================== START / RÄUME ================== -->
   <section id="home-screen" class="screen">
-    <div class="center-box">
-      <div class="top-row">
-        <h1>👶 Babyphone</h1>
-        <button id="logout-btn" class="text-btn">Abmelden</button>
+    <div class="card">
+      <div class="topbar">
+        <div class="brand small"><span class="brand-icon">🌙</span><h1>Babyphone</h1></div>
+        <button id="logout-btn" class="btn btn-ghost btn-sm">Abmelden</button>
       </div>
+
+      <h2 class="section-title">Räume</h2>
+      <div id="room-list" class="room-list"><p class="muted" id="room-empty">Noch keine Räume. Erstelle unten einen.</p></div>
 
       <label class="field-label" for="room">Raumname</label>
-      <input id="room" type="text" autocomplete="off" autocapitalize="none" placeholder="z.B. kinderzimmer" />
-      <p class="hint">Beide Geräte müssen den gleichen Raumnamen benutzen.</p>
+      <div class="row">
+        <input id="room" type="text" autocomplete="off" autocapitalize="none" placeholder="z.B. kinderzimmer" />
+        <button id="create-room-btn" class="btn btn-soft">+ Anlegen</button>
+      </div>
+      <p class="hint">Beide Geräte öffnen denselben Raum.</p>
 
-      <button id="send-btn" class="big-btn send">📡 SENDEN<br /><span class="btn-sub">(Handy am Babybett)</span></button>
-      <button id="receive-btn" class="big-btn receive">👀 EMPFANGEN<br /><span class="btn-sub">(Eltern-Gerät)</span></button>
+      <button id="send-btn" class="btn btn-green btn-block btn-big">📡 SENDEN<span class="btn-sub">Handy am Babybett</span></button>
+      <button id="receive-btn" class="btn btn-blue btn-block btn-big">👀 EMPFANGEN<span class="btn-sub">Eltern-Gerät</span></button>
     </div>
   </section>
 
-  <!-- ================== SENDER-BILDSCHIRM (Babybett) ================== -->
-  <section id="sender-screen" class="screen">
+  <!-- ================== KIND / SENDER (Babybett) ================== -->
+  <section id="child-screen" class="screen">
     <video id="local-video" class="full-video" autoplay playsinline muted></video>
 
-    <!-- Schwarzer Bildschirm-aus-Vorhang (Ton + Video laufen weiter) -->
+    <!-- Eltern-Video (klein eingeblendet), wenn Eltern ihre Kamera teilen -->
+    <div id="parent-pip" class="pip hidden"></div>
+
+    <!-- Schwarzer "Bildschirm aus"-Vorhang -->
     <div id="screen-off-curtain" class="curtain hidden">
-      <p>Bildschirm aus – Babyphone läuft weiter.<br />Tippen zum Aufwecken.</p>
+      <p>Bildschirm aus – läuft weiter.<br />Tippen zum Aufwecken.</p>
     </div>
 
-    <!-- Statusanzeige -->
-    <div class="status-pill" id="sender-status">Verbinde…</div>
+    <div class="status-pill" id="child-status">Verbinde…</div>
+    <button class="corner-btn" data-open="child-menu">⚙︎</button>
 
-    <!-- Menü-Knopf oben in der Ecke -->
-    <button class="corner-btn" data-menu="sender-menu">☰</button>
+    <!-- Sprech-Hinweis: leuchtet, wenn Eltern reden -->
+    <div id="parent-talking" class="talk-indicator hidden">🔊 Eltern sprechen…</div>
 
-    <!-- Untere Bedienleiste -->
-    <div class="control-bar">
-      <button id="switch-camera-btn" class="ctrl-btn">🔄<br />Kamera</button>
-      <button id="screen-off-btn" class="ctrl-btn">🌙<br />Bildschirm aus</button>
+    <div class="dock">
+      <button id="child-cam-btn" class="dock-btn"><span class="ic">🔄</span><span>Kamera</span></button>
+      <button id="child-video-toggle" class="dock-btn"><span class="ic">📷</span><span>Video</span></button>
+      <button id="screen-off-btn" class="dock-btn"><span class="ic">🌙</span><span>Display aus</span></button>
     </div>
 
-    <!-- Menü-Overlay -->
-    <div id="sender-menu" class="menu-overlay hidden">
-      <div class="menu-box">
-        <h2>Menü</h2>
-        <p class="menu-info">Raum: <strong class="room-name-label"></strong></p>
-        <button class="big-btn close-menu">Weiter senden</button>
-        <button class="big-btn danger stop-btn">Senden beenden</button>
+    <!-- Menü / Einstellungen Kind -->
+    <div id="child-menu" class="sheet hidden">
+      <div class="sheet-inner">
+        <div class="sheet-handle"></div>
+        <h2>Einstellungen <span class="room-name-label muted"></span></h2>
+
+        <label class="field-label">Kamera</label>
+        <select id="child-camera-select" class="select"></select>
+
+        <label class="field-label">Videoqualität</label>
+        <select id="child-quality-select" class="select">
+          <option value="low">Niedrig – spart Daten</option>
+          <option value="medium" selected>Mittel</option>
+          <option value="high">Hoch – beste Qualität</option>
+        </select>
+
+        <button class="btn btn-soft btn-block close-sheet">Schließen</button>
+        <button class="btn btn-danger btn-block stop-btn">Senden beenden</button>
       </div>
     </div>
   </section>
 
-  <!-- ================== EMPFÄNGER-BILDSCHIRM (Eltern) ================== -->
-  <section id="receiver-screen" class="screen">
+  <!-- ================== ELTERN / EMPFÄNGER ================== -->
+  <section id="parent-screen" class="screen">
     <video id="remote-video" class="full-video" autoplay playsinline></video>
 
-    <!-- Hinweis, falls noch kein Bild da ist -->
-    <div id="receiver-placeholder" class="placeholder">
+    <!-- eigene Kamera-Vorschau (klein), wenn Eltern Video senden -->
+    <video id="parent-self-video" class="pip hidden" autoplay playsinline muted></video>
+
+    <div id="parent-placeholder" class="placeholder">
       <div class="spinner"></div>
-      <p id="receiver-placeholder-text">Verbinde mit dem Babybett…</p>
+      <p id="parent-placeholder-text">Verbinde mit dem Babybett…</p>
     </div>
 
-    <!-- Tippen-zum-Ton Overlay (falls der Browser den Ton blockiert) -->
     <div id="unmute-overlay" class="unmute-overlay hidden">
       <p>🔇 Tippen, um den Ton einzuschalten</p>
     </div>
 
-    <!-- Statusanzeige -->
-    <div class="status-pill" id="receiver-status">Verbinde…</div>
+    <div class="status-pill" id="parent-status">Verbinde…</div>
+    <button class="corner-btn" data-open="parent-menu">⚙︎</button>
 
-    <!-- Menü-Knopf oben in der Ecke -->
-    <button class="corner-btn" data-menu="receiver-menu">☰</button>
-
-    <!-- Lautstärke-Regler unten -->
-    <div class="volume-bar">
-      <span class="vol-icon">🔉</span>
-      <input id="volume-slider" type="range" min="0" max="100" value="100" />
-      <span class="vol-icon">🔊</span>
+    <!-- Untere Steuerleiste Eltern -->
+    <div class="parent-controls">
+      <div class="volume-row">
+        <span class="vol-icon">🔉</span>
+        <input id="volume-slider" type="range" min="0" max="100" value="100" />
+        <span class="vol-icon">🔊</span>
+      </div>
+      <div class="dock">
+        <button id="talk-btn" class="dock-btn talk"><span class="ic">🎤</span><span>Sprechen</span></button>
+        <button id="parent-video-btn" class="dock-btn"><span class="ic">📹</span><span>Mein Video</span></button>
+        <button class="dock-btn" data-open="parent-menu"><span class="ic">⚙︎</span><span>Steuern</span></button>
+      </div>
     </div>
 
-    <!-- Menü-Overlay -->
-    <div id="receiver-menu" class="menu-overlay hidden">
-      <div class="menu-box">
-        <h2>Menü</h2>
-        <p class="menu-info">Raum: <strong class="room-name-label"></strong></p>
-        <button class="big-btn close-menu">Weiter empfangen</button>
-        <button class="big-btn danger stop-btn">Empfang beenden</button>
+    <!-- Menü / Fernsteuerung Eltern -->
+    <div id="parent-menu" class="sheet hidden">
+      <div class="sheet-inner">
+        <div class="sheet-handle"></div>
+        <h2>Babybett fernsteuern <span class="room-name-label muted"></span></h2>
+
+        <div class="ctrl-row">
+          <span>Video des Kind-Geräts an</span>
+          <label class="switch"><input type="checkbox" id="rc-child-video" checked><span class="slider"></span></label>
+        </div>
+
+        <div class="ctrl-row">
+          <span>Mein Video beim Kind zeigen</span>
+          <label class="switch"><input type="checkbox" id="rc-show-parent" checked><span class="slider"></span></label>
+        </div>
+
+        <label class="field-label">Videoqualität (Kind-Gerät)</label>
+        <select id="rc-quality" class="select">
+          <option value="low">Niedrig – spart Daten</option>
+          <option value="medium">Mittel</option>
+          <option value="high">Hoch – beste Qualität</option>
+        </select>
+
+        <label class="field-label">Lautstärke am Kind-Gerät (für eure Stimme)</label>
+        <input id="rc-child-volume" type="range" min="0" max="100" value="80" class="wide-range" />
+
+        <button class="btn btn-soft btn-block close-sheet">Schließen</button>
+        <button class="btn btn-danger btn-block stop-btn">Empfang beenden</button>
       </div>
     </div>
   </section>
 
-  <!-- Die ganze Logik steckt in app.js -->
   <script type="module" src="app.js"></script>
 </body>
 </html>
