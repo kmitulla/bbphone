@@ -211,4 +211,16 @@ input[type="range"]::-moz-range-thumb { width: 28px; height: 28px; border-radius
 .switch input:checked + .slider { background: var(--green); }
 .switch input:checked + .slider::before { transform: translateX(21px); }
 
+/* Start-Tor (ein Tipp zum Starten) */
+.start-gate {
+  position: fixed; inset: 0; z-index: 100;
+  background: radial-gradient(120% 80% at 50% 0%, #182143 0%, var(--bg) 60%);
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px calc(24px + env(safe-area-inset-left)) 24px calc(24px + env(safe-area-inset-right));
+}
+.start-gate-box { width: min(100%, 420px); text-align: center; }
+.start-gate-box .brand { margin-bottom: 10px; }
+.start-gate-box #start-gate-text { margin: 0 0 22px; }
+.start-gate-box .btn-ghost { margin-top: 10px; }
+
 .hidden { display: none !important; }

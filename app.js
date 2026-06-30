@@ -111,13 +111,21 @@ async function doLogin() {
 $("logout-btn").addEventListener("click", () => signOut(auth));
 
 onAuthStateChanged(auth, (user) => {
-  if (user) {
-    startRoomListListener();
-    if (!handleUrlAutostart()) showScreen("home");
-  } else {
-    stopRoomListListener();
-    stopEverything();
-    showScreen("login");
+  try {
+    if (user) {
+      startRoomListListener();
+      // Immer zuerst die sichtbare Übersicht zeigen (nie ein schwarzer Bildschirm).
+      showScreen("home");
+      // Bei einem Lesezeichen-Link erscheint darüber ein großer "Starten"-Knopf.
+      handleUrlAutostart();
+    } else {
+      stopRoomListListener();
+      stopEverything();
+      showScreen("login");
+    }
+  } catch (e) {
+    // Im Zweifel auf einer sichtbaren Seite landen.
+    showScreen(user ? "home" : "login");
   }
 });
 
@@ -205,20 +213,46 @@ async function beginSession(mode) {
   else startParent(room);
 }
 
+let pendingStart = null;   // gemerkter Lesezeichen-Start (room + mode)
+
 function handleUrlAutostart() {
   const params = new URLSearchParams(location.search);
   const room = cleanRoomName(params.get("room") || "");
   const mode = params.get("mode");
   if (room && (mode === "send" || mode === "receive")) {
-    localStorage.setItem("babyphone_room", room);
-    ensureRoom(room).then(() => {
-      if (mode === "send") startChild(room);
-      else startParent(room);
-    });
+    showStartGate(room, mode);
     return true;
   }
   return false;
 }
+
+// Start-Tor zeigen: EIN bewusster Tipp – wichtig, damit das iPhone
+// danach Kamera/Mikrofon bzw. den Ton erlaubt (sonst schwarzer Bildschirm).
+function showStartGate(room, mode) {
+  pendingStart = { room, mode };
+  $("start-gate-text").textContent =
+    (mode === "send" ? "📡 Senden" : "👀 Empfangen") + " · Raum: " + room;
+  $("start-gate-btn").textContent =
+    mode === "send" ? "📡 Senden starten" : "👀 Empfangen starten";
+  $("start-gate").classList.remove("hidden");
+}
+
+$("start-gate-btn").addEventListener("click", async () => {
+  if (!pendingStart) return;
+  const { room, mode } = pendingStart;
+  pendingStart = null;
+  $("start-gate").classList.add("hidden");
+  localStorage.setItem("babyphone_room", room);
+  await ensureRoom(room);
+  if (mode === "send") startChild(room);
+  else startParent(room);
+});
+$("start-gate-home").addEventListener("click", () => {
+  pendingStart = null;
+  $("start-gate").classList.add("hidden");
+  if (location.search) history.replaceState(null, "", location.pathname);
+  showScreen("home");
+});
 
 /* ===========================================================
    8) WebRTC-Werkzeuge
@@ -317,8 +351,9 @@ async function startChild(roomName) {
       audio: { echoCancellation: true, noiseSuppression: true }
     });
   } catch (e) {
-    setStatus("child-status", "Kein Zugriff auf Kamera/Mikro", "disconnected");
-    alert("Bitte Kamera und Mikrofon erlauben, dann Seite neu laden.");
+    currentSession = null;
+    alert("Kein Zugriff auf Kamera/Mikrofon.\n\nBitte am iPhone erlauben (Einstellungen → Safari → Kamera/Mikrofon)\nund dann erneut auf SENDEN tippen.");
+    showScreen("home");
     return;
   }
   childVideoTrack = localStream.getVideoTracks()[0];
@@ -721,6 +756,8 @@ function stopEverything() {
   $("screen-off-curtain").classList.add("hidden");
   $("unmute-overlay").classList.add("hidden");
   $("parent-talking").classList.add("hidden");
+  $("start-gate").classList.add("hidden");
+  pendingStart = null;
   $("parent-pip").innerHTML = "";
 
   if (controlUnsub) { try { controlUnsub(); } catch (e) {} controlUnsub = null; }
