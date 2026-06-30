@@ -23,7 +23,11 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
   bei mehreren Eltern automatisch als **Splitscreen**.
 - 🟢 **Anwesenheit**: In der Raumliste und im Raum wird angezeigt, ob schon ein Babybett (👶) oder
   Eltern (👀) im Raum sind.
-- ✨ **Modernes „Liquid-Glass"-Design** (iOS-Stil, dunkel/nachttauglich), große Touch-Flächen.
+- ✨ **Modernes „Liquid-Glass"-Design** (iOS-Stil, dunkel/nachttauglich), echte SVG-Icons statt Emojis.
+- 🎛️ **Volle Fernsteuerung** vom Eltern-Gerät – inkl. **Kamera-Auswahl** am Kind-Gerät.
+- 🔁 **Bild drehen** am Eltern-Gerät (90° / 180° / 270°).
+- 🧑‍🤝‍🧑 **Anwesenheit mit Namen** (Anmeldename + Rolle: Babybett oder Eltern).
+- 🔊 **Hintergrund-Ton-Option** (experimentell; auf dem iPhone vom System eingeschränkt).
 - 🎛️ **Fernsteuerung vom Eltern-Gerät**: Video des Kind-Geräts an/aus, Videoqualität,
   ob das Eltern-Video beim Kind sichtbar ist, und die Lautstärke der Elternstimme am Kind-Gerät.
 - 📊 **Videoqualität einstellbar** (Niedrig/Mittel/Hoch) – auch per Fernsteuerung, um Daten zu sparen.

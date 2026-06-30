@@ -260,4 +260,45 @@ input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; border-radius
 .presence-line { margin: 0 0 18px; font-size: 14px; color: var(--green); min-height: 18px; }
 .start-gate-box .btn-ghost { margin-top: 10px; }
 
+/* ===========================================================
+   SVG-Icons (statt Emojis) – iOS-Stil
+   =========================================================== */
+.ic, .ic-lg, .vol-icon, .brand-icon { display: inline-flex; align-items: center; justify-content: center; color: currentColor; }
+svg { stroke-linecap: round; stroke-linejoin: round; display: block; }
+.dock-btn .ic svg { width: 25px; height: 25px; }
+.ic-lg svg { width: 30px; height: 30px; }
+.vol-icon svg { width: 20px; height: 20px; }
+.brand-icon { color: #ffce63; }
+.brand-icon svg { width: 26px; height: 26px; }
+.corner-btn .ic svg { width: 22px; height: 22px; }
+.talk-indicator .ic svg { width: 18px; height: 18px; }
+.unmute-box .ic svg { width: 20px; height: 20px; }
+.talk-indicator, .unmute-box { display: inline-flex; align-items: center; gap: 8px; }
+.room-item .del svg { width: 19px; height: 19px; }
+.room-item .name .ic svg { width: 19px; height: 19px; vertical-align: -3px; }
+.room-badge svg, .presence-chip svg, .presence-list svg { width: 15px; height: 15px; }
+
+/* große Knöpfe: Icon + Titel + Untertitel sauber stapeln */
+.btn-big { gap: 3px; }
+.btn-big .ic-lg { margin-bottom: 3px; }
+.btn-main { font-size: 21px; font-weight: 700; }
+
+/* Dreh-Container für das Empfänger-Bild */
+.remote-wrap { position: absolute; inset: 0; overflow: hidden; z-index: 1; background: #000; }
+
+/* Anwesenheits-Chip mit Namen */
+.presence-chip { display: inline-flex; align-items: center; gap: 7px; max-width: 92vw; overflow: hidden; text-overflow: ellipsis; }
+.presence-chip .who { display: inline-flex; align-items: center; gap: 4px; }
+.presence-chip .who .on { color: var(--green); }
+
+/* Anwesenheitsliste im Menü */
+.presence-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+.presence-row { display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid var(--glass-brd); }
+.presence-row .who-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presence-row .who-tag { font-size: 12px; padding: 3px 9px; border-radius: 999px; }
+.presence-row .who-tag.child { background: rgba(61,220,132,.22); color: #8ff0bd; }
+.presence-row .who-tag.parent { background: rgba(91,157,255,.22); color: #aaccff; }
+
+.sheet-inner .section-title { margin-top: 18px; margin-bottom: 8px; }
+
 .hidden { display: none !important; }
