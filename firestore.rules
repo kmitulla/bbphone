@@ -1,0 +1,22 @@
+// ===========================================================
+// Firestore-Sicherheitsregeln für das Babyphone
+// -----------------------------------------------------------
+// Bedeutung: Nur ANGEMELDETE Nutzer dürfen Räume und
+// Verbindungsdaten lesen und schreiben. Niemand sonst.
+// ===========================================================
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Alles unterhalb von /rooms/... (inkl. Verbindungen und ICE-Kandidaten):
+    match /rooms/{room}/{document=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Sicherheitsnetz: alles andere ist verboten.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

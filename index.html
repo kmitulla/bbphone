@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Damit es auf dem Handy gut aussieht und nicht zoomt -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <title>Babyphone</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- ================== ANMELDE-BILDSCHIRM ================== -->
+  <section id="login-screen" class="screen active">
+    <div class="center-box">
+      <h1>👶 Babyphone</h1>
+      <p class="subtitle">Bitte anmelden</p>
+
+      <label class="field-label" for="email">E-Mail</label>
+      <input id="email" type="email" inputmode="email" autocomplete="username" placeholder="name@beispiel.de" />
+
+      <label class="field-label" for="password">Passwort</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+
+      <button id="login-btn" class="big-btn primary">Anmelden</button>
+      <p id="login-error" class="error-text"></p>
+      <p class="hint">Neue Nutzer werden in der Firebase-Konsole angelegt.</p>
+    </div>
+  </section>
+
+  <!-- ================== START-BILDSCHIRM ================== -->
+  <section id="home-screen" class="screen">
+    <div class="center-box">
+      <div class="top-row">
+        <h1>👶 Babyphone</h1>
+        <button id="logout-btn" class="text-btn">Abmelden</button>
+      </div>
+
+      <label class="field-label" for="room">Raumname</label>
+      <input id="room" type="text" autocomplete="off" autocapitalize="none" placeholder="z.B. kinderzimmer" />
+      <p class="hint">Beide Geräte müssen den gleichen Raumnamen benutzen.</p>
+
+      <button id="send-btn" class="big-btn send">📡 SENDEN<br /><span class="btn-sub">(Handy am Babybett)</span></button>
+      <button id="receive-btn" class="big-btn receive">👀 EMPFANGEN<br /><span class="btn-sub">(Eltern-Gerät)</span></button>
+    </div>
+  </section>
+
+  <!-- ================== SENDER-BILDSCHIRM (Babybett) ================== -->
+  <section id="sender-screen" class="screen">
+    <video id="local-video" class="full-video" autoplay playsinline muted></video>
+
+    <!-- Schwarzer Bildschirm-aus-Vorhang (Ton + Video laufen weiter) -->
+    <div id="screen-off-curtain" class="curtain hidden">
+      <p>Bildschirm aus – Babyphone läuft weiter.<br />Tippen zum Aufwecken.</p>
+    </div>
+
+    <!-- Statusanzeige -->
+    <div class="status-pill" id="sender-status">Verbinde…</div>
+
+    <!-- Menü-Knopf oben in der Ecke -->
+    <button class="corner-btn" data-menu="sender-menu">☰</button>
+
+    <!-- Untere Bedienleiste -->
+    <div class="control-bar">
+      <button id="switch-camera-btn" class="ctrl-btn">🔄<br />Kamera</button>
+      <button id="screen-off-btn" class="ctrl-btn">🌙<br />Bildschirm aus</button>
+    </div>
+
+    <!-- Menü-Overlay -->
+    <div id="sender-menu" class="menu-overlay hidden">
+      <div class="menu-box">
+        <h2>Menü</h2>
+        <p class="menu-info">Raum: <strong class="room-name-label"></strong></p>
+        <button class="big-btn close-menu">Weiter senden</button>
+        <button class="big-btn danger stop-btn">Senden beenden</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================== EMPFÄNGER-BILDSCHIRM (Eltern) ================== -->
+  <section id="receiver-screen" class="screen">
+    <video id="remote-video" class="full-video" autoplay playsinline></video>
+
+    <!-- Hinweis, falls noch kein Bild da ist -->
+    <div id="receiver-placeholder" class="placeholder">
+      <div class="spinner"></div>
+      <p id="receiver-placeholder-text">Verbinde mit dem Babybett…</p>
+    </div>
+
+    <!-- Tippen-zum-Ton Overlay (falls der Browser den Ton blockiert) -->
+    <div id="unmute-overlay" class="unmute-overlay hidden">
+      <p>🔇 Tippen, um den Ton einzuschalten</p>
+    </div>
+
+    <!-- Statusanzeige -->
+    <div class="status-pill" id="receiver-status">Verbinde…</div>
+
+    <!-- Menü-Knopf oben in der Ecke -->
+    <button class="corner-btn" data-menu="receiver-menu">☰</button>
+
+    <!-- Lautstärke-Regler unten -->
+    <div class="volume-bar">
+      <span class="vol-icon">🔉</span>
+      <input id="volume-slider" type="range" min="0" max="100" value="100" />
+      <span class="vol-icon">🔊</span>
+    </div>
+
+    <!-- Menü-Overlay -->
+    <div id="receiver-menu" class="menu-overlay hidden">
+      <div class="menu-box">
+        <h2>Menü</h2>
+        <p class="menu-info">Raum: <strong class="room-name-label"></strong></p>
+        <button class="big-btn close-menu">Weiter empfangen</button>
+        <button class="big-btn danger stop-btn">Empfang beenden</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Die ganze Logik steckt in app.js -->
+  <script type="module" src="app.js"></script>
+</body>
+</html>

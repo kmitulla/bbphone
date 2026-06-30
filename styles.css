@@ -1,0 +1,330 @@
+/* ===========================================================
+   Babyphone – Design
+   Dunkel (nachttauglich), große Knöpfe, gut fürs Handy.
+   =========================================================== */
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #000;
+  color: #f2f2f2;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 18px;
+  overscroll-behavior: none;
+}
+
+/* Jeder "Bildschirm" füllt die ganze Seite. Nur der aktive ist sichtbar. */
+.screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.screen.active {
+  display: block;
+}
+
+/* Zentrierte Box für Anmelden / Start */
+.center-box {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  max-width: 480px;
+  height: max-content;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+h1 {
+  font-size: 30px;
+  text-align: center;
+  margin: 0 0 4px;
+}
+.subtitle {
+  text-align: center;
+  color: #9aa0a6;
+  margin: 0 0 24px;
+}
+.top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.top-row h1 { text-align: left; margin: 0; }
+
+.field-label {
+  font-size: 15px;
+  color: #9aa0a6;
+  margin: 14px 0 6px;
+}
+
+input[type="email"],
+input[type="password"],
+input[type="text"] {
+  width: 100%;
+  padding: 16px;
+  font-size: 18px;
+  border: 2px solid #333;
+  border-radius: 12px;
+  background: #1a1a1a;
+  color: #fff;
+}
+input:focus {
+  outline: none;
+  border-color: #4a90d9;
+}
+
+/* Große Knöpfe */
+.big-btn {
+  width: 100%;
+  padding: 22px;
+  margin-top: 16px;
+  font-size: 22px;
+  font-weight: 700;
+  border: none;
+  border-radius: 16px;
+  color: #fff;
+  background: #2a2a2a;
+  cursor: pointer;
+  line-height: 1.3;
+}
+.big-btn:active { transform: scale(0.98); }
+.btn-sub {
+  font-size: 15px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.big-btn.primary { background: #4a90d9; }
+.big-btn.send    { background: #2e7d32; }   /* grün = senden */
+.big-btn.receive { background: #1565c0; }   /* blau = empfangen */
+.big-btn.danger  { background: #c62828; }   /* rot = beenden */
+
+.text-btn {
+  background: none;
+  border: none;
+  color: #9aa0a6;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 8px;
+}
+
+.hint {
+  font-size: 14px;
+  color: #777;
+  margin: 10px 0 0;
+}
+.error-text {
+  color: #ff6b6b;
+  min-height: 22px;
+  margin: 12px 0 0;
+  text-align: center;
+}
+
+/* ===== Video, das den ganzen Bildschirm füllt ===== */
+.full-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;   /* ganzes Bild zeigen, nichts abschneiden */
+  background: #000;
+}
+
+/* Statusanzeige oben */
+.status-pill {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.6);
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 15px;
+  z-index: 20;
+  white-space: nowrap;
+}
+.status-pill.connected   { background: rgba(46,125,50,0.85); }
+.status-pill.connecting  { background: rgba(245,166,35,0.85); }
+.status-pill.disconnected{ background: rgba(198,40,40,0.85); }
+
+/* Menü-Knopf in der Ecke (oben links, schwer versehentlich zu treffen beim Schauen) */
+.corner-btn {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  left: 8px;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  border: none;
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  font-size: 22px;
+  z-index: 30;
+  cursor: pointer;
+}
+
+/* Untere Bedienleiste (Sender) */
+.control-bar {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 16px);
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  z-index: 20;
+}
+.ctrl-btn {
+  background: rgba(0,0,0,0.55);
+  border: none;
+  color: #fff;
+  border-radius: 14px;
+  padding: 12px 18px;
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.ctrl-btn:active { transform: scale(0.97); }
+
+/* Lautstärke-Regler (Empfänger) */
+.volume-bar {
+  position: absolute;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(90%, 460px);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: rgba(0,0,0,0.5);
+  padding: 12px 20px;
+  border-radius: 999px;
+  z-index: 20;
+}
+.vol-icon { font-size: 22px; }
+
+#volume-slider {
+  flex: 1;
+  height: 38px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+#volume-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 4px;
+  background: #555;
+}
+#volume-slider::-moz-range-track {
+  height: 8px;
+  border-radius: 4px;
+  background: #555;
+}
+#volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 34px;
+  height: 34px;
+  margin-top: -13px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+}
+#volume-slider::-moz-range-thumb {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+}
+
+/* Schwarzer "Bildschirm aus"-Vorhang */
+.curtain {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #333;        /* sehr dezent, spart Strom auf OLED */
+  font-size: 15px;
+  padding: 24px;
+}
+
+/* Platzhalter (Empfänger, noch kein Bild) */
+.placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  background: #000;
+  z-index: 10;
+  text-align: center;
+  padding: 24px;
+  color: #aaa;
+}
+.spinner {
+  width: 54px;
+  height: 54px;
+  border: 5px solid #333;
+  border-top-color: #4a90d9;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Tippen-zum-Ton Overlay */
+.unmute-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.55);
+  z-index: 25;
+  font-size: 20px;
+  text-align: center;
+  padding: 24px;
+}
+
+/* Menü-Overlay */
+.menu-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.8);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.menu-box {
+  width: 100%;
+  max-width: 380px;
+  background: #1a1a1a;
+  border-radius: 18px;
+  padding: 24px;
+}
+.menu-box h2 { margin: 0 0 8px; text-align: center; }
+.menu-info { text-align: center; color: #9aa0a6; margin: 0 0 12px; }
+
+/* Hilfsklasse zum Aus-/Einblenden */
+.hidden { display: none !important; }
