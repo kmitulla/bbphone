@@ -24,6 +24,11 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
 - 🟢 **Anwesenheit**: In der Raumliste und im Raum wird angezeigt, ob schon ein Babybett (👶) oder
   Eltern (👀) im Raum sind.
 - ✨ **Modernes „Liquid-Glass"-Design** (iOS-Stil, dunkel/nachttauglich), echte SVG-Icons statt Emojis.
+- 🌙 **Screensaver statt Standbild**: Endet das Videobild (Video aus, Verbindung weg, Senden beendet),
+  friert das letzte Bild **nicht** ein – ein animierter Nachthimmel mit Uhr erscheint,
+  inkl. Hinweis „Ton läuft weiter", wenn der Ton noch an ist.
+- 🚪 **Raum verlassen per Knopf** (oben rechts) – mit eigener, schöner Sicherheitsfrage
+  („Wirklich verlassen?") statt einer System-Meldung.
 - 🎛️ **Volle Fernsteuerung** vom Eltern-Gerät – inkl. **Kamera-Auswahl** am Kind-Gerät.
 - 🔁 **Bild drehen** am Eltern-Gerät (90° / 180° / 270°).
 - 🧑‍🤝‍🧑 **Anwesenheit mit Namen** (Anmeldename + Rolle: Babybett oder Eltern).
@@ -32,7 +37,8 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
   ob das Eltern-Video beim Kind sichtbar ist, und die Lautstärke der Elternstimme am Kind-Gerät.
 - 📊 **Videoqualität einstellbar** (Niedrig/Mittel/Hoch) – auch per Fernsteuerung, um Daten zu sparen.
 - 🔄 **Alle Kameras wählbar** (z.B. alle iPhone-Kameras) + Schnell-Umschalter Front/Rück.
-- 🚫 **Kein versehentliches Auflegen** – Beenden nur über das Menü (⚙︎ oben links) + Nachfrage.
+- 🚫 **Kein versehentliches Auflegen** – Verlassen nur über den Knopf oben rechts
+  (oder das Menü) + Sicherheitsfrage.
 - 🔁 **Automatisch neu verbinden**, wenn das WLAN kurz weg ist.
 - ☀️ **Bildschirm bleibt an** (Wake Lock), solange die Babyphone-Ansicht offen ist.
 - 🌙 **„Display aus"** am Babybett-Handy (schwarzer Bildschirm, Ton + Video laufen weiter, spart Akku).
@@ -263,7 +269,9 @@ Teste in dieser Reihenfolge:
 - [ ] Eltern-Bildschirm geht **nicht** von selbst aus (Wake Lock).
 - [ ] **Zweites Eltern-Gerät** dazu – beide sehen gleichzeitig das Bild.
 - [ ] WLAN am Eltern-Gerät kurz aus/an – es verbindet sich **automatisch neu**.
-- [ ] **Beenden** nur über das Menü (⚙︎ oben links) + Nachfrage.
+- [ ] **Raum verlassen** über den Knopf oben rechts – die Sicherheitsfrage erscheint als eigener Dialog.
+- [ ] **Screensaver**: Video am Kind-Gerät ausschalten oder Senden beenden – am Eltern-Gerät
+      erscheint der Nachthimmel mit Uhr (kein eingefrorenes Bild).
 - [ ] (iPhone) Über Safari **„Zum Home-Bildschirm"** – Icon erscheint, App öffnet im Vollbild.
 
 ### Schritt 3: Über VPN testen

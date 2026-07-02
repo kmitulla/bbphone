@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#0a0e1f" />
+  <meta name="theme-color" content="#060a18" />
 
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -23,8 +23,11 @@
   <!-- ================== ANMELDEN ================== -->
   <section id="login-screen" class="screen active">
     <div class="card glass">
-      <div class="brand"><span class="brand-icon" data-icon="moon"></span><h1>Babyphone</h1></div>
-      <p class="subtitle">Bitte anmelden</p>
+      <div class="brand-hero">
+        <span class="brand-mark" data-icon="moon"></span>
+        <h1>Babyphone</h1>
+        <p class="subtitle">Willkommen zurück</p>
+      </div>
 
       <label class="field-label" for="email">E-Mail</label>
       <input id="email" type="email" inputmode="email" autocomplete="username" placeholder="name@beispiel.de" />
@@ -34,7 +37,7 @@
 
       <button id="login-btn" class="btn btn-primary btn-block">Anmelden</button>
       <p id="login-error" class="error-text"></p>
-      <p class="hint">Nutzer werden in der Firebase-Konsole angelegt.</p>
+      <p class="hint centered">Nutzer werden in der Firebase-Konsole angelegt.</p>
     </div>
   </section>
 
@@ -49,15 +52,25 @@
       <h2 class="section-title">Räume</h2>
       <div id="room-list" class="room-list"><p class="muted" id="room-empty">Noch keine Räume. Erstelle unten einen.</p></div>
 
-      <label class="field-label" for="room">Raumname</label>
       <div class="row">
-        <input id="room" type="text" autocomplete="off" autocapitalize="none" placeholder="z.B. kinderzimmer" />
+        <input id="room" type="text" autocomplete="off" autocapitalize="none" placeholder="Neuer Raum, z.B. kinderzimmer" />
         <button id="create-room-btn" class="btn btn-soft">Anlegen</button>
       </div>
       <p class="hint">Beide Geräte öffnen denselben Raum.</p>
 
-      <button id="send-btn" class="btn btn-green btn-block btn-big"><span class="ic-lg" data-icon="broadcast"></span><span class="btn-main">SENDEN</span><span class="btn-sub">Handy am Babybett</span></button>
-      <button id="receive-btn" class="btn btn-blue btn-block btn-big"><span class="ic-lg" data-icon="eye"></span><span class="btn-main">EMPFANGEN</span><span class="btn-sub">Eltern-Gerät</span></button>
+      <h2 class="section-title">Modus wählen</h2>
+      <div class="mode-grid">
+        <button id="send-btn" class="mode-card send">
+          <span class="mode-ic" data-icon="broadcast"></span>
+          <span class="mode-title">Senden</span>
+          <span class="mode-sub">Handy am Babybett</span>
+        </button>
+        <button id="receive-btn" class="mode-card receive">
+          <span class="mode-ic" data-icon="eye"></span>
+          <span class="mode-title">Empfangen</span>
+          <span class="mode-sub">Eltern-Gerät</span>
+        </button>
+      </div>
     </div>
   </section>
 
@@ -78,7 +91,8 @@
       <div class="status-pill glass" id="child-status">Verbinde…</div>
       <div class="presence-chip glass hidden" id="child-presence"></div>
     </div>
-    <button class="corner-btn glass" data-open="child-menu"><span class="ic" data-icon="gear"></span></button>
+    <button class="corner-btn glass" data-open="child-menu" title="Einstellungen"><span class="ic" data-icon="gear"></span></button>
+    <button class="corner-btn corner-right danger glass" data-exit title="Raum verlassen"><span class="ic" data-icon="leave"></span></button>
 
     <div id="parent-talking" class="talk-indicator hidden"><span class="ic" data-icon="volume-high"></span> Eltern sprechen…</div>
 
@@ -110,7 +124,7 @@
         </select>
 
         <button class="btn btn-soft btn-block close-sheet">Schließen</button>
-        <button class="btn btn-danger btn-block stop-btn">Senden beenden</button>
+        <button class="btn btn-danger btn-block stop-btn">Raum verlassen</button>
       </div>
     </div>
   </section>
@@ -119,6 +133,30 @@
   <section id="parent-screen" class="screen">
     <div id="remote-wrap" class="remote-wrap">
       <video id="remote-video" class="full-video" autoplay playsinline></video>
+    </div>
+
+    <!-- Screensaver: erscheint, wenn kein Live-Videobild da ist (kein Standbild) -->
+    <div id="parent-screensaver" class="screensaver hidden" aria-hidden="true">
+      <div class="ss-stars"></div>
+      <div class="ss-stars two"></div>
+      <div class="ss-content">
+        <div class="ss-moon">
+          <svg viewBox="0 0 24 24" fill="none">
+            <defs>
+              <linearGradient id="ss-moon-grad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#fff3d4" />
+                <stop offset="1" stop-color="#ffd47e" />
+              </linearGradient>
+            </defs>
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" fill="url(#ss-moon-grad)" />
+          </svg>
+        </div>
+        <div id="ss-clock" class="ss-clock">–:–</div>
+        <p id="ss-text" class="ss-text"></p>
+        <div id="ss-audio" class="ss-audio hidden">
+          <span></span><span></span><span></span><em>Ton läuft weiter</em>
+        </div>
+      </div>
     </div>
 
     <video id="parent-self-video" class="pip glass hidden" autoplay playsinline muted></video>
@@ -136,7 +174,8 @@
       <div class="status-pill glass" id="parent-status">Verbinde…</div>
       <div class="presence-chip glass hidden" id="parent-presence"></div>
     </div>
-    <button class="corner-btn glass" data-open="parent-menu"><span class="ic" data-icon="gear"></span></button>
+    <button class="corner-btn glass" data-open="parent-menu" title="Fernsteuerung"><span class="ic" data-icon="gear"></span></button>
+    <button class="corner-btn corner-right danger glass" data-exit title="Raum verlassen"><span class="ic" data-icon="leave"></span></button>
 
     <!-- Untere Steuerleiste Eltern -->
     <div class="parent-controls">
@@ -192,7 +231,7 @@
         <p class="hint">Hält den Ton an, wenn du kurz eine andere App öffnest. Auf dem iPhone vom System eingeschränkt – läuft nicht immer.</p>
 
         <button class="btn btn-soft btn-block close-sheet">Schließen</button>
-        <button class="btn btn-danger btn-block stop-btn">Empfang beenden</button>
+        <button class="btn btn-danger btn-block stop-btn">Raum verlassen</button>
       </div>
     </div>
   </section>
@@ -205,6 +244,18 @@
       <p id="start-gate-presence" class="presence-line"></p>
       <button id="start-gate-btn" class="btn btn-primary btn-block btn-big">Starten</button>
       <button id="start-gate-home" class="btn btn-ghost btn-block">Zur Übersicht</button>
+    </div>
+  </div>
+
+  <!-- ===== Dialog (eigene Sicherheitsfrage statt System-Meldung) ===== -->
+  <div id="app-dialog" class="dialog-backdrop hidden">
+    <div class="dialog glass">
+      <h3 id="dialog-title"></h3>
+      <p id="dialog-text"></p>
+      <div class="dialog-actions">
+        <button id="dialog-cancel" class="btn btn-soft">Abbrechen</button>
+        <button id="dialog-ok" class="btn btn-danger">OK</button>
+      </div>
     </div>
   </div>
 

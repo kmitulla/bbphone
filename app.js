@@ -95,6 +95,7 @@ const ICON = {
   trash: SVG('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
   door: SVG('<path d="M3 21h18"/><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><circle cx="14.5" cy="12" r="1" fill="currentColor" stroke="none"/>'),
   person: SVG('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
+  leave: SVG('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'),
 };
 function injectIcons(root = document) {
   root.querySelectorAll("[data-icon]").forEach(el => {
@@ -122,6 +123,37 @@ function unlockMedia() {
     o.start(); o.stop(sharedAudioCtx.currentTime + 0.03);
   } catch (e) {}
 }
+
+/* ===========================================================
+   4b) Eigener Dialog (statt System-confirm/alert)
+   =========================================================== */
+let dialogResolve = null;
+function showDialog({ title, text = "", okLabel = "OK", cancelLabel = "Abbrechen", danger = false, showCancel = true }) {
+  return new Promise((resolve) => {
+    // Falls schon ein Dialog offen ist: den alten sauber auflösen.
+    if (dialogResolve) { dialogResolve(false); }
+    dialogResolve = resolve;
+    $("dialog-title").textContent = title;
+    $("dialog-text").textContent = text;
+    $("dialog-text").classList.toggle("hidden", !text);
+    const ok = $("dialog-ok");
+    ok.textContent = okLabel;
+    ok.classList.toggle("btn-danger", danger);
+    ok.classList.toggle("btn-primary", !danger);
+    $("dialog-cancel").classList.toggle("hidden", !showCancel);
+    $("dialog-cancel").textContent = cancelLabel;
+    $("app-dialog").classList.remove("hidden");
+  });
+}
+function closeDialog(result) {
+  $("app-dialog").classList.add("hidden");
+  if (dialogResolve) { dialogResolve(result); dialogResolve = null; }
+}
+const showConfirm = (opts) => showDialog({ danger: true, ...opts });
+const showAlert = (title, text) => showDialog({ title, text, showCancel: false, danger: false });
+$("dialog-ok").addEventListener("click", () => closeDialog(true));
+$("dialog-cancel").addEventListener("click", () => closeDialog(false));
+$("app-dialog").addEventListener("click", (e) => { if (e.target === $("app-dialog")) closeDialog(false); });
 
 function setStatus(elId, text, kind) {
   const el = $(elId); if (!el) return;
@@ -201,9 +233,14 @@ function startRoomListListener() {
       item.innerHTML = `<span class="name"><span class="ic" data-icon="door"></span> ${name}</span><span class="room-badge"></span><button class="del" title="Raum löschen">${ICON.trash}</button>`;
       injectIcons(item);
       item.querySelector(".name").addEventListener("click", () => selectRoom(name, item));
-      item.querySelector(".del").addEventListener("click", (e) => {
+      item.querySelector(".del").addEventListener("click", async (e) => {
         e.stopPropagation();
-        if (confirm(`Raum "${name}" aus der Liste löschen?`)) deleteRoom(name);
+        const ok = await showConfirm({
+          title: `Raum „${name}“ löschen?`,
+          text: "Der Raum wird für alle Geräte aus der Liste entfernt.",
+          okLabel: "Löschen"
+        });
+        if (ok) deleteRoom(name);
       });
       list.appendChild(item);
       // Anwesenheit pro Raum live anzeigen
@@ -253,7 +290,7 @@ async function deleteRoom(name) {
 
 $("create-room-btn").addEventListener("click", async () => {
   const name = cleanRoomName($("room").value);
-  if (!name) { alert("Bitte zuerst einen Raumnamen eingeben."); return; }
+  if (!name) { showAlert("Raumname fehlt", "Bitte zuerst einen Raumnamen eingeben."); return; }
   $("room").value = name;
   await ensureRoom(name);
 });
@@ -273,7 +310,7 @@ function cleanRoomName(v) {
 
 async function beginSession(mode) {
   const room = cleanRoomName($("room").value);
-  if (!room) { alert("Bitte zuerst einen Raum auswählen oder anlegen."); return; }
+  if (!room) { showAlert("Kein Raum gewählt", "Bitte zuerst einen Raum auswählen oder anlegen."); return; }
   localStorage.setItem("babyphone_room", room);
   await ensureRoom(room);
   if (mode === "send") startChild(room);
@@ -301,9 +338,9 @@ let gatePresenceUnsub = null;
 function showStartGate(room, mode) {
   pendingStart = { room, mode };
   $("start-gate-text").textContent =
-    (mode === "send" ? "📡 Senden" : "👀 Empfangen") + " · Raum: " + room;
+    (mode === "send" ? "Senden" : "Empfangen") + " · Raum: " + room;
   $("start-gate-btn").textContent =
-    mode === "send" ? "📡 Senden starten" : "👀 Empfangen starten";
+    mode === "send" ? "Senden starten" : "Empfangen starten";
   $("start-gate-presence").textContent = "";
   if (gatePresenceUnsub) { try { gatePresenceUnsub(); } catch (e) {} }
   gatePresenceUnsub = onSnapshot(collection(db, "rooms", room, "presence"), (snap) => {
@@ -523,7 +560,8 @@ async function startChild(roomName) {
     });
   } catch (e) {
     currentSession = null;
-    alert("Kein Zugriff auf Kamera/Mikrofon.\n\nBitte am iPhone erlauben (Einstellungen → Safari → Kamera/Mikrofon)\nund dann erneut auf SENDEN tippen.");
+    showAlert("Kein Zugriff auf Kamera/Mikrofon",
+      "Bitte am iPhone erlauben (Einstellungen → Safari → Kamera/Mikrofon) und dann erneut auf „Senden“ tippen.");
     showScreen("home");
     return;
   }
@@ -765,7 +803,7 @@ async function switchCamera(videoConstraint, publish = true) {
       const id = childVideoTrack.getSettings().deviceId;
       if (id) setControl({ cameraId: id });
     }
-  } catch (e) { alert("Kamera konnte nicht gewechselt werden."); }
+  } catch (e) { showAlert("Kamera", "Die Kamera konnte nicht gewechselt werden."); }
 }
 
 // Kind: Video lokal an/aus (schreibt auch in die Fernsteuerung)
@@ -789,6 +827,38 @@ let parentMicStream = null;      // Mikro der Eltern (für Sprechen)
 let parentCamStream = null;      // Kamera der Eltern (für eigenes Video)
 let talkOn = false;
 let parentVideoOn = false;
+
+/* ----- Screensaver: statt eingefrorenem Standbild -----
+   Sobald kein LIVE-Videobild mehr ankommt (Video aus, Verbindung weg,
+   Senden beendet), legt sich ein animierter Nacht-Bildschirm über das Video. */
+let ssClockTimer = null;
+function updateScreensaverClock() {
+  $("ss-clock").textContent = new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+}
+function showScreensaver(text, audioLive) {
+  $("ss-text").textContent = text;
+  $("ss-audio").classList.toggle("hidden", !audioLive);
+  updateScreensaverClock();
+  if (!ssClockTimer) ssClockTimer = setInterval(updateScreensaverClock, 5000);
+  $("parent-screensaver").classList.remove("hidden");
+}
+function hideScreensaver() {
+  if (ssClockTimer) { clearInterval(ssClockTimer); ssClockTimer = null; }
+  $("parent-screensaver").classList.add("hidden");
+}
+// Zustand prüfen: Gibt es gerade ein echtes, laufendes Videobild?
+function updateParentViewState() {
+  if (!currentSession || currentSession.mode !== "receive") { hideScreensaver(); return; }
+  const stream = $("remote-video").srcObject;
+  if (!stream) { hideScreensaver(); return; }   // noch nie verbunden -> Platzhalter läuft
+  const videoLive = stream.getVideoTracks().some(t => t.readyState === "live" && !t.muted);
+  const audioLive = stream.getAudioTracks().some(t => t.readyState === "live" && !t.muted);
+  const connected = parentPc && parentPc.connectionState === "connected";
+  if (connected && videoLive) { hideScreensaver(); return; }
+  if (!connected) showScreensaver("Verbindung getrennt – verbinde neu…", false);
+  else if (!control.childVideoEnabled) showScreensaver("Video ist ausgeschaltet", audioLive);
+  else showScreensaver("Warte auf Videobild…", audioLive);
+}
 
 async function startParent(roomName) {
   currentSession = { mode: "receive", room: roomName };
@@ -815,6 +885,11 @@ async function connectParent(roomName) {
   pc.ontrack = (e) => {
     $("remote-video").srcObject = e.streams[0];
     $("parent-placeholder").classList.add("hidden");
+    // Live-Zustand der Spur beobachten (Video an/aus -> Screensaver statt Standbild).
+    e.track.onmute = updateParentViewState;
+    e.track.onunmute = updateParentViewState;
+    e.track.onended = updateParentViewState;
+    updateParentViewState();
     tryPlayRemote();
   };
   pc.onconnectionstatechange = () => {
@@ -829,6 +904,7 @@ async function connectParent(roomName) {
       setStatus("parent-status", "Getrennt, versuche erneut…", "disconnected");
       scheduleReconnect(roomName);
     }
+    updateParentViewState();
   };
 
   const connsRef = collection(db, "rooms", roomName, "connections");
@@ -903,7 +979,7 @@ async function toggleTalk() {
   if (talkOn) {
     if (!parentMicStream) {
       try { parentMicStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
-      catch (e) { talkOn = false; $("talk-btn").classList.remove("active"); alert("Kein Zugriff aufs Mikrofon."); return; }
+      catch (e) { talkOn = false; $("talk-btn").classList.remove("active"); showAlert("Mikrofon", "Kein Zugriff auf das Mikrofon."); return; }
     }
     await sendParentTrack("audio", parentMicStream.getAudioTracks()[0]);
   } else {
@@ -919,7 +995,7 @@ async function toggleParentVideo() {
   if (parentVideoOn) {
     if (!parentCamStream) {
       try { parentCamStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", ...QUALITY[control.quality] } }); }
-      catch (e) { parentVideoOn = false; $("parent-video-btn").classList.remove("active"); alert("Kein Zugriff auf die Kamera."); return; }
+      catch (e) { parentVideoOn = false; $("parent-video-btn").classList.remove("active"); showAlert("Kamera", "Kein Zugriff auf die Kamera."); return; }
     }
     $("parent-self-video").srcObject = parentCamStream;
     $("parent-self-video").classList.remove("hidden");
@@ -950,6 +1026,7 @@ $("rc-child-volume").addEventListener("input", (e) => setControl({ childVolume: 
 $("rc-camera").addEventListener("change", (e) => setControl({ cameraId: e.target.value }));
 
 function syncRemoteControlsUI() {
+  updateParentViewState();
   $("rc-child-video").checked = control.childVideoEnabled;
   $("rc-show-parent").checked = control.showParentVideoOnChild;
   $("rc-quality").value = control.quality;
@@ -1002,10 +1079,20 @@ document.querySelectorAll(".close-sheet").forEach(btn => {
 document.querySelectorAll(".sheet").forEach(sheet => {
   sheet.addEventListener("click", (e) => { if (e.target === sheet) sheet.classList.add("hidden"); });
 });
-document.querySelectorAll(".stop-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    if (confirm("Babyphone wirklich beenden?")) { stopEverything(); showScreen("home"); }
+// Raum verlassen: eigener Dialog als Sicherheitsfrage (keine System-Meldung).
+async function askLeaveRoom() {
+  const mode = currentSession && currentSession.mode;
+  const ok = await showConfirm({
+    title: "Raum wirklich verlassen?",
+    text: mode === "send"
+      ? "Die Übertragung vom Babybett wird beendet."
+      : "Die Verbindung zum Babybett wird beendet.",
+    okLabel: "Verlassen"
   });
+  if (ok) { stopEverything(); showScreen("home"); }
+}
+document.querySelectorAll(".stop-btn, [data-exit]").forEach(btn => {
+  btn.addEventListener("click", askLeaveRoom);
 });
 
 function stopEverything() {
@@ -1013,6 +1100,7 @@ function stopEverything() {
   currentSession = null;
 
   document.querySelectorAll(".sheet").forEach(m => m.classList.add("hidden"));
+  hideScreensaver();
   $("screen-off-curtain").classList.add("hidden");
   $("unmute-overlay").classList.add("hidden");
   $("parent-talking").classList.add("hidden");
