@@ -177,6 +177,15 @@
     <button class="corner-btn glass" data-open="parent-menu" title="Fernsteuerung"><span class="ic" data-icon="gear"></span></button>
     <button class="corner-btn corner-right danger glass" data-exit title="Raum verlassen"><span class="ic" data-icon="leave"></span></button>
 
+    <!-- Deutliches Warn-Banner bei Verbindungsverlust -->
+    <div id="conn-lost" class="conn-lost hidden">
+      <span class="ic" data-icon="wifi-off"></span>
+      <div class="conn-lost-text">
+        <strong>Verbindung verloren</strong>
+        <span>Es wird automatisch neu verbunden…</span>
+      </div>
+    </div>
+
     <!-- Untere Steuerleiste Eltern -->
     <div class="parent-controls">
       <div class="volume-row glass">
@@ -218,6 +227,10 @@
         <div class="ctrl-row">
           <span>Mein Video beim Kind zeigen</span>
           <label class="switch"><input type="checkbox" id="rc-show-parent" checked><span class="slider"></span></label>
+        </div>
+        <div class="ctrl-row">
+          <span>Bildschirm am Kind-Gerät aus <small class="muted">(schwarzer Vorhang)</small></span>
+          <label class="switch"><input type="checkbox" id="rc-screen-off"><span class="slider"></span></label>
         </div>
 
         <label class="field-label">Lautstärke am Kind-Gerät (für eure Stimme)</label>

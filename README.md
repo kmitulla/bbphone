@@ -29,6 +29,10 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
   inkl. Hinweis „Ton läuft weiter", wenn der Ton noch an ist.
 - 🚪 **Raum verlassen per Knopf** (oben rechts) – mit eigener, schöner Sicherheitsfrage
   („Wirklich verlassen?") statt einer System-Meldung.
+- 📴 **„Display aus" auch per Fernsteuerung**: Die Eltern können den Bildschirm
+  des Kind-Geräts aus der Ferne aus- und wieder einschalten.
+- 📶 **Deutliche Verbindungsverlust-Warnung**: Reißt die Verbindung ab, zeigt das
+  Eltern-Gerät ein rotes, pulsierendes Banner mit Symbol – und verbindet automatisch neu.
 - 🎛️ **Volle Fernsteuerung** vom Eltern-Gerät – inkl. **Kamera-Auswahl** am Kind-Gerät.
 - 🔁 **Bild drehen** am Eltern-Gerät (90° / 180° / 270°).
 - 🧑‍🤝‍🧑 **Anwesenheit mit Namen** (Anmeldename + Rolle: Babybett oder Eltern).

@@ -353,6 +353,29 @@ input[type="range"]::-moz-range-thumb { width: 26px; height: 26px; border-radius
 .ss-audio em { font-style: normal; margin-left: 7px; }
 @keyframes ss-eq { 0%, 100% { transform: scaleY(0.35); } 50% { transform: scaleY(1); } }
 
+/* ---------- Verbindungsverlust-Banner (Eltern) ---------- */
+.conn-lost {
+  position: absolute; top: calc(env(safe-area-inset-top, 0px) + 68px);
+  left: 50%; transform: translateX(-50%);
+  z-index: 27; max-width: 92vw;
+  display: flex; align-items: center; gap: 13px;
+  padding: 14px 20px; border-radius: 20px;
+  color: #ffd6d7;
+  background: linear-gradient(180deg, rgba(255,90,95,0.32), rgba(160,35,40,0.26));
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  border: 1px solid rgba(255,110,115,0.5);
+  box-shadow: 0 14px 40px rgba(226,59,65,0.4), inset 0 1px 0 rgba(255,255,255,0.22);
+  animation: fade-in 0.25s ease, conn-pulse 1.6s ease-in-out infinite;
+}
+.conn-lost .ic { flex: none; }
+.conn-lost .ic svg { width: 27px; height: 27px; }
+.conn-lost-text { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
+.conn-lost-text strong { font-size: 15.5px; color: #fff; letter-spacing: -0.1px; white-space: nowrap; }
+.conn-lost-text span { font-size: 12.5px; white-space: nowrap; }
+@keyframes conn-pulse {
+  50% { box-shadow: 0 14px 52px rgba(226,59,65,0.65), inset 0 1px 0 rgba(255,255,255,0.22); border-color: rgba(255,140,145,0.75); }
+}
+
 /* ---------- Bottom Sheet ---------- */
 .sheet { position: absolute; inset: 0; background: rgba(3,5,14,0.55); z-index: 50; display: flex; align-items: flex-end; animation: fade-in 0.2s ease; }
 .sheet-inner {
