@@ -105,6 +105,7 @@
       <button id="child-cam-btn" class="dock-btn glass"><span class="ic" data-icon="flip"></span><span>Kamera</span></button>
       <button id="child-video-toggle" class="dock-btn glass"><span class="ic" data-icon="video"></span><span>Video</span></button>
       <button id="screen-off-btn" class="dock-btn glass"><span class="ic" data-icon="moon"></span><span>Display aus</span></button>
+      <button id="child-eco-btn" class="dock-btn glass"><span class="ic" data-icon="eco"></span><span>Akku sparen</span></button>
     </div>
 
     <!-- Menü / Einstellungen Kind -->
@@ -186,6 +187,15 @@
       </div>
     </div>
 
+    <!-- Audiopegel (rechts): zeigt, dass die Übertragung lebt -->
+    <div id="audio-meter" class="audio-meter">
+      <div id="meter-col" class="meter-col glass">
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+        <span></span><span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <button id="meter-toggle" class="meter-btn glass" title="Audiopegel ein-/ausblenden"><span class="ic" data-icon="activity"></span></button>
+    </div>
+
     <!-- Untere Steuerleiste Eltern -->
     <div class="parent-controls">
       <div class="volume-row glass">
@@ -193,9 +203,11 @@
         <input id="volume-slider" type="range" min="0" max="100" value="100" />
         <span class="vol-icon" data-icon="volume-high"></span>
       </div>
-      <div class="dock">
+      <div class="dock dock-6">
         <button id="talk-btn" class="dock-btn glass talk"><span class="ic" data-icon="mic"></span><span>Sprechen</span></button>
-        <button id="parent-video-btn" class="dock-btn glass"><span class="ic" data-icon="video"></span><span>Mein Video</span></button>
+        <button id="parent-video-btn" class="dock-btn glass"><span class="ic" data-icon="video"></span><span>Video</span></button>
+        <button id="parent-screen-btn" class="dock-btn glass"><span class="ic" data-icon="moon"></span><span>Display</span></button>
+        <button id="parent-eco-btn" class="dock-btn glass"><span class="ic" data-icon="eco"></span><span>Akku</span></button>
         <button id="rotate-btn" class="dock-btn glass"><span class="ic" data-icon="rotate"></span><span>Drehen</span></button>
         <button class="dock-btn glass" data-open="parent-menu"><span class="ic" data-icon="sliders"></span><span>Steuern</span></button>
       </div>
@@ -229,8 +241,8 @@
           <label class="switch"><input type="checkbox" id="rc-show-parent" checked><span class="slider"></span></label>
         </div>
         <div class="ctrl-row">
-          <span>Bildschirm am Kind-Gerät aus <small class="muted">(schwarzer Vorhang)</small></span>
-          <label class="switch"><input type="checkbox" id="rc-screen-off"><span class="slider"></span></label>
+          <span>Akku-Sparmodus am Kind-Gerät <small class="muted">(weniger Bild-Daten)</small></span>
+          <label class="switch"><input type="checkbox" id="rc-eco-child"><span class="slider"></span></label>
         </div>
 
         <label class="field-label">Lautstärke am Kind-Gerät (für eure Stimme)</label>

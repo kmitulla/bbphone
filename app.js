@@ -47,7 +47,12 @@ const QUALITY = {
   low:    { width: 320,  height: 240, frameRate: 15 },
   medium: { width: 640,  height: 480, frameRate: 24 },
   high:   { width: 1280, height: 720, frameRate: 30 },
+  eco:    { width: 320,  height: 240, frameRate: 10 },   // Akku-Sparmodus
 };
+// Aktive Qualität des Kind-Geräts (Akku-Sparmodus überstimmt die Wahl):
+function activeQuality() {
+  return control.ecoChild ? QUALITY.eco : QUALITY[control.quality];
+}
 
 function rtcConfig() {
   return { iceServers: NUTZE_STUN ? [{ urls: STUN_SERVER }] : [] };
@@ -97,6 +102,8 @@ const ICON = {
   person: SVG('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
   leave: SVG('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'),
   "wifi-off": SVG('<line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>'),
+  eco: SVG('<path d="M5 18H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3.19M15 6h2a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3.19"/><line x1="23" y1="13" x2="23" y2="11"/><polyline points="11 6 7 12 13 12 9 18"/>'),
+  activity: SVG('<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>'),
 };
 function injectIcons(root = document) {
   root.querySelectorAll("[data-icon]").forEach(el => {
@@ -165,7 +172,7 @@ function setStatus(elId, text, kind) {
 
 // Standard-Fernsteuerung (Werte im Raum-Dokument):
 function defaultControl() {
-  return { childVideoEnabled: true, quality: "medium", showParentVideoOnChild: true, childVolume: 80, cameraId: "", screenOff: false };
+  return { childVideoEnabled: true, quality: "medium", showParentVideoOnChild: true, childVolume: 80, cameraId: "", screenOff: false, ecoChild: false };
 }
 
 /* ===========================================================
@@ -556,7 +563,7 @@ async function startChild(roomName) {
 
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: currentFacing, ...QUALITY[control.quality] },
+      video: { facingMode: currentFacing, ...activeQuality() },
       audio: { echoCancellation: true, noiseSuppression: true }
     });
   } catch (e) {
@@ -587,10 +594,10 @@ async function startChild(roomName) {
         createChildPeer(roomName, change.doc.id);
       }
       if (change.type === "added" || change.type === "modified") {
-        // Expliziter Eltern-Status (Video an? Sprechen an?). Zuverlässiger als
-        // die mute-Ereignisse der Spuren, die Safari oft nicht meldet.
-        connFlags.set(change.doc.id, { video: data.parentVideo, talking: data.parentTalking });
-        updateParentStage();
+        // Expliziter Eltern-Status (Video an? Sprechen an? Bild gewünscht?).
+        // Zuverlässiger als die mute-Ereignisse, die Safari oft nicht meldet.
+        connFlags.set(change.doc.id, { video: data.parentVideo, talking: data.parentTalking, wantVideo: data.wantVideo });
+        applyControlOnChild();
       }
       if (change.type === "removed") closeChildPeer(change.doc.id);
     });
@@ -606,8 +613,10 @@ async function createChildPeer(roomName, connId) {
   // ohne dass wir die Verbindung neu aushandeln müssen).
   const videoTx = pc.addTransceiver("video", { direction: "sendrecv", streams: [localStream] });
   const audioTx = pc.addTransceiver("audio", { direction: "sendrecv", streams: [localStream] });
-  // Eigene Kamera/Mikro senden:
-  try { await videoTx.sender.replaceTrack(control.childVideoEnabled ? childVideoTrack : null); } catch (e) {}
+  // Eigene Kamera/Mikro senden (Eltern im Akku-Sparmodus bekommen kein Bild):
+  const flags = connFlags.get(connId) || {};
+  const giveVideo = control.childVideoEnabled && flags.wantVideo !== false;
+  try { await videoTx.sender.replaceTrack(giveVideo ? childVideoTrack : null); } catch (e) {}
   try { await audioTx.sender.replaceTrack(localStream.getAudioTracks()[0]); } catch (e) {}
 
   // Eingehende Eltern-Spuren (Stimme + evtl. Video) anzeigen/abspielen:
@@ -727,7 +736,8 @@ function updateParentStage() {
   parentTiles.forEach((entry, connId) => {
     const flags = connFlags.get(connId) || {};
     // Explizit "Video aus" gemeldet -> Kachel sicher verbergen (kein Standbild).
-    const show = control.showParentVideoOnChild && flags.video !== false && tileHasLiveVideo(entry);
+    // Im Akku-Sparmodus des Kind-Geräts gar kein Eltern-Video decodieren.
+    const show = control.showParentVideoOnChild && !control.ecoChild && flags.video !== false && tileHasLiveVideo(entry);
     entry.el.classList.toggle("empty", !show);
     if (show) active++;
   });
@@ -752,16 +762,20 @@ async function applyControlOnChild() {
   if (control.cameraId && childVideoTrack && childVideoTrack.getSettings().deviceId !== control.cameraId) {
     await switchCamera({ deviceId: control.cameraId }, false);
   }
-  // Video an/aus:
-  for (const pc of childPeers.values()) {
+  // Video an/aus – pro Verbindung: Eltern im Akku-Sparmodus bekommen kein Bild.
+  for (const [connId, pc] of childPeers) {
     const s = senderForKind(pc, "video");
-    if (s) { try { await s.replaceTrack(control.childVideoEnabled ? childVideoTrack : null); } catch (e) {} }
+    const flags = connFlags.get(connId) || {};
+    const give = control.childVideoEnabled && flags.wantVideo !== false;
+    if (s) { try { await s.replaceTrack(give ? childVideoTrack : null); } catch (e) {} }
   }
-  // Qualität:
-  if (childVideoTrack) { try { await childVideoTrack.applyConstraints(QUALITY[control.quality]); } catch (e) {} }
+  // Qualität (im Akku-Sparmodus stark reduziert):
+  if (childVideoTrack) { try { await childVideoTrack.applyConstraints(activeQuality()); } catch (e) {} }
   $("child-quality-select").value = control.quality;
   // Bildschirm an/aus (auch fernsteuerbar): schwarzer Vorhang, alles läuft weiter.
   $("screen-off-curtain").classList.toggle("hidden", !control.screenOff);
+  // Akku-Sparmodus-Knopf
+  $("child-eco-btn").classList.toggle("active", !!control.ecoChild);
   // Eltern-Bühne (Lautstärke + Sichtbarkeit) aktualisieren:
   updateParentStage();
   // Knopf-Status "Video"
@@ -805,7 +819,7 @@ async function switchCamera(videoConstraint, publish = true) {
   if (!localStream) return;
   try {
     const newStream = await navigator.mediaDevices.getUserMedia({
-      video: { ...videoConstraint, ...QUALITY[control.quality] }, audio: false
+      video: { ...videoConstraint, ...activeQuality() }, audio: false
     });
     const newTrack = newStream.getVideoTracks()[0];
     for (const pc of childPeers.values()) {
@@ -842,6 +856,15 @@ $("screen-off-curtain").addEventListener("click", () => {
   setControl({ screenOff: false });
 });
 
+// Akku-Sparmodus am Kind-Gerät: Bild klein + wenige Bilder/Sekunde,
+// Bildschirm dunkel, kein Eltern-Video decodieren. Ton läuft normal weiter.
+$("child-eco-btn").addEventListener("click", () => {
+  const on = !control.ecoChild;
+  $("child-eco-btn").classList.toggle("active", on);
+  $("screen-off-curtain").classList.toggle("hidden", !on);
+  setControl({ ecoChild: on, screenOff: on });
+});
+
 /* ===========================================================
    12) ELTERN-GERÄT – empfängt; kann sprechen + eigenes Video
    =========================================================== */
@@ -855,6 +878,7 @@ let parentMicStream = null;      // Mikro der Eltern (für Sprechen)
 let parentCamStream = null;      // Kamera der Eltern (für eigenes Video)
 let talkOn = false;
 let parentVideoOn = false;
+let parentEco = false;           // Akku-Sparmodus der Eltern: nur Ton, kein Videobild
 
 /* ----- Screensaver: statt eingefrorenem Standbild -----
    Sobald kein LIVE-Videobild mehr ankommt (Video aus, Verbindung weg,
@@ -900,8 +924,10 @@ function updateParentViewState() {
   // Deutliches Warn-Banner bei Verbindungsverlust (nachdem schon einmal verbunden war).
   $("conn-lost").classList.toggle("hidden", !(inReceive && stream && !connected));
   if (!inReceive || !stream) { hideScreensaver(); return; }   // noch nie verbunden -> Platzhalter läuft
+  if (meterOn) startAudioMeter();   // Pegel-Anzeige (nach-)starten, sobald ein Stream da ist
   const videoLive = stream.getVideoTracks().some(t => t.readyState === "live" && !t.muted) && framesFresh();
   const audioLive = stream.getAudioTracks().some(t => t.readyState === "live" && !t.muted);
+  if (connected && parentEco) { showScreensaver("Akku-Sparmodus – nur Ton", audioLive); return; }
   if (connected && videoLive) { hideScreensaver(); return; }
   if (!connected) showScreensaver("Verbindung zum Babybett verloren", false);
   else if (!control.childVideoEnabled) showScreensaver("Video ist ausgeschaltet", audioLive);
@@ -928,6 +954,10 @@ async function startParent(roomName) {
   clearInterval(viewStateTimer);
   viewStateTimer = setInterval(updateParentViewState, 1500);
 
+  // Audiopegel-Anzeige (gemerkte Einstellung) + Knopf-Zustände
+  setMeterVisible();
+  $("parent-eco-btn").classList.toggle("active", parentEco);
+
   connectParent(roomName);
 }
 
@@ -945,6 +975,7 @@ async function connectParent(roomName) {
     e.track.onunmute = updateParentViewState;
     e.track.onended = updateParentViewState;
     updateParentViewState();
+    if (meterOn) startAudioMeter();
     tryPlayRemote();
   };
   pc.onconnectionstatechange = () => {
@@ -967,7 +998,7 @@ async function connectParent(roomName) {
   try {
     connRef = await addDoc(connsRef, {
       role: "parent", createdAt: serverTimestamp(),
-      parentTalking: talkOn, parentVideo: parentVideoOn
+      parentTalking: talkOn, parentVideo: parentVideoOn, wantVideo: !parentEco
     });
   }
   catch (e) { setStatus("parent-status", "Getrennt, versuche erneut…", "disconnected"); scheduleReconnect(roomName); return; }
@@ -1032,6 +1063,100 @@ $("volume-slider").addEventListener("input", (e) => {
   if (e.target.value > 0) v.muted = false;
 });
 
+/* ----- Audiopegel-Anzeige (rechts, sehr empfindlich) -----
+   Beruhigung: Auch wenn sich im Bild nichts bewegt, sieht man am zuckenden
+   Pegel, dass die Übertragung lebt. Reagiert schon auf leises Rauschen. */
+const METER_SEGMENTS = 12;
+let meterOn = localStorage.getItem("babyphone_meter") !== "0";
+let meterSource = null, meterAnalyser = null, meterBuf = null;
+let meterStream = null, meterRaf = null, meterLevel = 0;
+
+function setMeterVisible() {
+  $("meter-col").classList.toggle("hidden", !meterOn);
+  $("meter-toggle").classList.toggle("active", meterOn);
+}
+$("meter-toggle").addEventListener("click", () => {
+  unlockMedia();
+  meterOn = !meterOn;
+  localStorage.setItem("babyphone_meter", meterOn ? "1" : "0");
+  setMeterVisible();
+  if (meterOn) startAudioMeter(); else stopMeterLoop();
+});
+
+function startAudioMeter() {
+  if (!currentSession || currentSession.mode !== "receive") return;
+  const stream = $("remote-video").srcObject;
+  if (!stream || stream.getAudioTracks().length === 0) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!sharedAudioCtx) sharedAudioCtx = new Ctx();
+    if (sharedAudioCtx.state === "suspended") sharedAudioCtx.resume().catch(() => {});
+    if (meterStream !== stream) {
+      try { if (meterSource) meterSource.disconnect(); } catch (e) {}
+      meterStream = stream;
+      meterSource = sharedAudioCtx.createMediaStreamSource(stream);
+      meterAnalyser = sharedAudioCtx.createAnalyser();
+      meterAnalyser.fftSize = 1024;
+      meterAnalyser.smoothingTimeConstant = 0.55;
+      meterSource.connect(meterAnalyser);   // NICHT an die Ausgabe (sonst Doppel-Ton)
+      meterBuf = new Float32Array(meterAnalyser.fftSize);
+    }
+    if (!meterRaf) meterLoop();
+  } catch (e) {}
+}
+function meterLoop() {
+  meterRaf = requestAnimationFrame(meterLoop);
+  if (!meterAnalyser || !meterOn) return;
+  let rms = 0;
+  if (meterAnalyser.getFloatTimeDomainData) {
+    meterAnalyser.getFloatTimeDomainData(meterBuf);
+    for (let i = 0; i < meterBuf.length; i++) rms += meterBuf[i] * meterBuf[i];
+    rms = Math.sqrt(rms / meterBuf.length);
+  } else {
+    const b = new Uint8Array(meterAnalyser.fftSize);
+    meterAnalyser.getByteTimeDomainData(b);
+    for (let i = 0; i < b.length; i++) { const v = (b[i] - 128) / 128; rms += v * v; }
+    rms = Math.sqrt(rms / b.length);
+  }
+  // Sehr empfindliche Skala: -75 dB (leisestes Rauschen) bis -25 dB (laut).
+  const db = 20 * Math.log10(rms || 1e-8);
+  const target = Math.max(0, Math.min(1, (db + 75) / 50));
+  meterLevel = Math.max(target, meterLevel * 0.92);   // schnell rauf, sanft runter
+  const lit = Math.round(meterLevel * METER_SEGMENTS);
+  const segs = $("meter-col").children;
+  for (let i = 0; i < segs.length; i++) segs[i].classList.toggle("lit", i < lit);
+}
+function stopMeterLoop() {
+  if (meterRaf) { cancelAnimationFrame(meterRaf); meterRaf = null; }
+  meterLevel = 0;
+  const segs = $("meter-col").children;
+  for (let i = 0; i < segs.length; i++) segs[i].classList.remove("lit");
+}
+function stopAudioMeter() {
+  stopMeterLoop();
+  try { if (meterSource) meterSource.disconnect(); } catch (e) {}
+  meterSource = null; meterAnalyser = null; meterStream = null; meterBuf = null;
+}
+
+/* ----- Display des Kind-Geräts fernschalten (Dock-Knopf) ----- */
+$("parent-screen-btn").addEventListener("click", () => {
+  const off = !control.screenOff;
+  $("parent-screen-btn").classList.toggle("active", off);
+  setControl({ screenOff: off });
+});
+
+/* ----- Akku-Sparmodus der Eltern: nur Ton, kein Videobild -----
+   Meldet dem Kind-Gerät "kein Bild für mich" (spart Funk + Akku auf beiden
+   Seiten, andere Eltern sehen weiter zu) und zeigt den dunklen Nachthimmel
+   mit Uhr und Audiopegel. */
+$("parent-eco-btn").addEventListener("click", () => {
+  parentEco = !parentEco;
+  $("parent-eco-btn").classList.toggle("active", parentEco);
+  publishParentState();
+  updateParentViewState();
+});
+
 /* ----- Sprechen (Push-to-talk: tippen = an/aus) -----
    Zuverlässigkeit: Die Mikro-Spur wird EINMAL angehängt und bleibt am Sender.
    An/Aus schaltet nur track.enabled um (kein An-/Abhängen der Spur mehr –
@@ -1086,7 +1211,7 @@ async function sendParentTrack(kind, track) {
 // Das Kind-Gerät blendet damit Kachel + "Eltern sprechen…" zuverlässig ein/aus.
 async function publishParentState() {
   if (!parentConnRef) return;
-  try { await updateDoc(parentConnRef, { parentTalking: talkOn, parentVideo: parentVideoOn }); } catch (e) {}
+  try { await updateDoc(parentConnRef, { parentTalking: talkOn, parentVideo: parentVideoOn, wantVideo: !parentEco }); } catch (e) {}
 }
 // Nach (Neu-)Verbindung Sprechen/Video wieder herstellen.
 async function reattachParentTracks() {
@@ -1102,7 +1227,7 @@ async function reattachParentTracks() {
 /* ----- Fernsteuer-Bedienelemente (Menü) ----- */
 $("rc-child-video").addEventListener("change", (e) => setControl({ childVideoEnabled: e.target.checked }));
 $("rc-show-parent").addEventListener("change", (e) => setControl({ showParentVideoOnChild: e.target.checked }));
-$("rc-screen-off").addEventListener("change", (e) => setControl({ screenOff: e.target.checked }));
+$("rc-eco-child").addEventListener("change", (e) => setControl({ ecoChild: e.target.checked }));
 $("rc-quality").addEventListener("change", (e) => setControl({ quality: e.target.value }));
 $("rc-child-volume").addEventListener("input", (e) => setControl({ childVolume: Number(e.target.value) }));
 $("rc-camera").addEventListener("change", (e) => setControl({ cameraId: e.target.value }));
@@ -1111,7 +1236,8 @@ function syncRemoteControlsUI() {
   updateParentViewState();
   $("rc-child-video").checked = control.childVideoEnabled;
   $("rc-show-parent").checked = control.showParentVideoOnChild;
-  $("rc-screen-off").checked = !!control.screenOff;
+  $("rc-eco-child").checked = !!control.ecoChild;
+  $("parent-screen-btn").classList.toggle("active", !!control.screenOff);
   $("rc-quality").value = control.quality;
   $("rc-child-volume").value = control.childVolume;
   // Kamera-Auswahl (vom Kind gemeldete Kameras) füllen
@@ -1184,8 +1310,13 @@ function stopEverything() {
 
   document.querySelectorAll(".sheet").forEach(m => m.classList.add("hidden"));
   hideScreensaver();
+  stopAudioMeter();
   clearInterval(viewStateTimer); viewStateTimer = null;
   lastFrameTs = 0;
+  parentEco = false;
+  $("parent-eco-btn").classList.remove("active");
+  $("parent-screen-btn").classList.remove("active");
+  $("child-eco-btn").classList.remove("active");
   $("conn-lost").classList.add("hidden");
   $("screen-off-curtain").classList.add("hidden");
   $("unmute-overlay").classList.add("hidden");

@@ -33,6 +33,14 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
   des Kind-Geräts aus der Ferne aus- und wieder einschalten.
 - 📶 **Deutliche Verbindungsverlust-Warnung**: Reißt die Verbindung ab, zeigt das
   Eltern-Gerät ein rotes, pulsierendes Banner mit Symbol – und verbindet automatisch neu.
+- 📊 **Audiopegel-Anzeige** (Eltern, rechts am Rand): zuckt schon beim leisesten
+  Rauschen – so sieht man immer, dass die Übertragung lebt, auch wenn sich im Bild
+  nichts bewegt. Per Knopf darunter ein-/ausblendbar.
+- 🔋 **Akku-Sparmodus auf beiden Seiten**: Am Kind-Gerät (Knopf „Akku sparen" oder
+  per Fernsteuerung) wird das Video klein und langsam (320p, 10 fps), der Bildschirm
+  dunkel und kein Eltern-Video decodiert – der Ton bleibt voll da. Am Eltern-Gerät
+  (Knopf „Akku") wird nur noch Ton übertragen: dunkler Nachthimmel mit Uhr und
+  Audiopegel statt Video; andere Eltern im Raum sehen das Bild weiterhin.
 - 🎛️ **Volle Fernsteuerung** vom Eltern-Gerät – inkl. **Kamera-Auswahl** am Kind-Gerät.
 - 🔁 **Bild drehen** am Eltern-Gerät (90° / 180° / 270°).
 - 🧑‍🤝‍🧑 **Anwesenheit mit Namen** (Anmeldename + Rolle: Babybett oder Eltern).
