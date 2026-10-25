@@ -16,7 +16,7 @@
 
   <title>Babyphone</title>
   <!-- ?v=… sorgt dafür, dass Handys nach einem Update die neue Version laden -->
-  <link rel="stylesheet" href="styles.css?v=5" />
+  <link rel="stylesheet" href="styles.css?v=6" />
 </head>
 <body>
 
@@ -25,6 +25,10 @@
     <div class="splash">
       <span class="app-logo big" data-icon="moon"></span>
       <div class="spinner"></div>
+      <div id="splash-msg" class="splash-msg hidden">
+        <p>Die App lädt nicht. Ist das Internet an?</p>
+        <button type="button" class="btn btn-accent" onclick="location.reload()">Neu laden</button>
+      </div>
     </div>
   </section>
 
@@ -290,6 +294,13 @@
 
   <div id="toast" class="toast acrylic hidden" role="status" aria-live="polite"></div>
 
-  <script type="module" src="app.js?v=5"></script>
+  <!-- Falls die App (z.B. ohne Internet) nicht startet: nach 12 s einen Hinweis zeigen statt endlos zu laden -->
+  <script>
+    setTimeout(function () {
+      var s = document.getElementById("splash-screen");
+      if (s && s.classList.contains("active")) document.getElementById("splash-msg").classList.remove("hidden");
+    }, 12000);
+  </script>
+  <script type="module" src="app.js?v=6"></script>
 </body>
 </html>

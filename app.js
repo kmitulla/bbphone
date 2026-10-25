@@ -286,18 +286,21 @@ function primeMediaElements(els) {
 }
 
 /* Bildschirm wach halten */
-let wakeLock = null;
+let wakeLock = null, wakeLockPending = false;
 async function requestWakeLock() {
   if (!session || !("wakeLock" in navigator) || document.visibilityState !== "visible") return;
-  if (wakeLock) return;
+  if (wakeLock || wakeLockPending) return;
+  wakeLockPending = true;
   try {
     const lock = await navigator.wakeLock.request("screen");
+    wakeLockPending = false;
+    if (!session) { lock.release().catch(() => {}); return; }   // inzwischen beendet
     wakeLock = lock;
     lock.addEventListener("release", () => {
       if (wakeLock === lock) wakeLock = null;
       if (session && document.visibilityState === "visible") setTimeout(requestWakeLock, 1000);
     });
-  } catch (e) { log("WakeLock", e); }
+  } catch (e) { wakeLockPending = false; log("WakeLock", e); }
 }
 function releaseWakeLock() {
   const lock = wakeLock; wakeLock = null;
@@ -727,10 +730,14 @@ const child = {
   cameraAttempt: null, cameraError: false,
   stateKey: "",
   micRetry: null,
+  camWatch: null, camFrames: -1, camStall: 0, camRestarts: 0, camSwitchedAt: 0, badCamera: "", badIds: new Set(),
 };
 
+// Jeder Schritt hat ein Zeitlimit: hängt einer (z.B. Kamera-Anfrage), läuft die Steuerung trotzdem weiter.
 function childEnqueue(fn) {
-  child.queue = child.queue.then(() => (isChild() ? fn() : null)).catch(e => log(e));
+  child.queue = child.queue
+    .then(() => (isChild() ? withTimeout(fn(), 15000, null) : null))
+    .catch(e => log(e));
   return child.queue;
 }
 function videoSendTrack() { return (control.childVideoEnabled && child.video) ? child.video : null; }
@@ -741,7 +748,7 @@ async function startChild(room) {
   const my = session = { mode: "send", room, id: "s" + randomId(10) };
   requestWakeLock();
   roomData = {};
-  Object.assign(child, { cameraAttempt: null, cameraError: false, stateKey: "", camerasKey: "", applied: { videoOn: null, quality: null } });
+  Object.assign(child, { cameraAttempt: null, cameraError: false, stateKey: "", camerasKey: "", applied: { videoOn: null, quality: null }, queue: Promise.resolve(), camRestarts: 0, camSwitchedAt: 0, badCamera: "", badIds: new Set() });
   showScreen("child");
   setRoomLabels(room);
   setStatus("child-status", "Kamera wird gestartet…", "connecting");
@@ -781,6 +788,45 @@ async function startChild(room) {
 
   updateChildStatus();
   child.connUnsub = listenConnections(room);
+  startCameraWatch();
+}
+
+/* Wächter: Kommen von der Kamera wirklich Bilder? Bleibt sie hängen (kommt z.B.
+   auf dem iPhone nach Unterbrechungen vor), wird sie neu gestartet. */
+function startCameraWatch() {
+  clearInterval(child.camWatch);
+  child.camFrames = -1; child.camStall = 0;
+  child.camWatch = setInterval(async () => {
+    if (!isChild() || !child.video || !videoSendTrack()) { child.camStall = 0; return; }
+    const peers = [...child.peers.values()].filter(p => p.pc.connectionState === "connected" && p.wantVideo !== false);
+    if (!peers.length) { child.camStall = 0; return; }
+    let frames = 0;
+    for (const p of peers) {
+      try { (await p.pc.getStats()).forEach(s => { if (s.type === "outbound-rtp" && (s.kind || s.mediaType) === "video") frames += s.framesEncoded || 0; }); }
+      catch (e) { return; }
+    }
+    if (frames > child.camFrames) {
+      if (child.camFrames >= 0) child.camRestarts = 0;   // Bilder fließen
+      child.camFrames = frames; child.camStall = 0; return;
+    }
+    if (++child.camStall < 3) return;      // ~6 s keine neuen Bilder
+    child.camStall = 0; child.camFrames = -1;
+    const bad = child.cameraId;
+    const alt = child.cameras.find(c => c.id !== bad && !child.badIds.has(c.id));
+    if (Date.now() - child.camSwitchedAt < 30000 && alt) {
+      // Gerade gewählte Kamera liefert kein sendbares Bild (z.B. Infrarot-/Tiefenkamera) -> andere nehmen.
+      const label = (child.cameras.find(c => c.id === bad) || {}).label || "Diese Kamera";
+      log("Kamera liefert kein Bild – wechsle auf " + alt.label);
+      child.badCamera = label;
+      child.badIds.add(bad);
+      toast(`${label} liefert kein Bild – Wechsel auf ${alt.label}.`, 6000);
+      childEnqueue(() => switchCamera({ deviceId: alt.id }, true));
+    } else if (child.camRestarts < 2) {
+      child.camRestarts++;
+      log("Kamera liefert keine Bilder – starte neu");
+      childEnqueue(() => switchCamera(child.cameraId ? { deviceId: child.cameraId } : { facing: child.facing }, false));
+    }
+  }, 2000);
 }
 
 async function openChildMedia() {
@@ -932,6 +978,7 @@ async function switchCamera(target, local) {
     child.cameraId = "";
   }
   child.cameraError = !ok;
+  if (ok && (target.deviceId || target.facing)) child.camSwitchedAt = Date.now();
   await refreshCameraList();
   if (local && child.cameraId) { child.cameraAttempt = null; setControl({ cameraId: child.cameraId }); }
   updateChildUI();
@@ -961,6 +1008,7 @@ async function refreshCameraList() {
 
 $("child-camera-select").addEventListener("change", (e) => {
   const id = e.target.value;
+  child.badCamera = "";
   if (isChild() && id && id !== child.cameraId) childEnqueue(() => switchCamera({ deviceId: id }, true));
 });
 $("child-cam-btn").addEventListener("click", () => {
@@ -1031,6 +1079,7 @@ async function applyControlOnChild() {
   const want = control.cameraId;
   if (want && want !== child.cameraId && want !== child.cameraAttempt && child.cameras.some(c => c.id === want)) {
     child.cameraAttempt = want;
+    child.badCamera = "";
     await switchCamera({ deviceId: want }, false);
     if (!isChild()) return;
   }
@@ -1075,6 +1124,7 @@ function publishChildState() {
     session: session.id,
     cameraId: child.cameraId || "",
     cameraError: !!child.cameraError,
+    badCamera: child.badCamera || "",
     hasVideo: !!child.hasVideo,
     videoOn: !!(child.hasVideo && control.childVideoEnabled),
     audioOn: !!(child.audio && control.childAudioEnabled !== false),
@@ -1311,7 +1361,12 @@ function updateParentStage() {
   $("parent-talking").classList.toggle("hidden", !talkers.length);
   $("child-unmute").classList.toggle("hidden", !blocked);
   // Stromsparmodus: schwarzer Bildschirm – außer die Eltern zeigen gerade ihr Video.
-  $("screen-off-curtain").classList.toggle("hidden", !(control.powerSave && shown === 0));
+  const dark = control.powerSave && shown === 0;
+  $("screen-off-curtain").classList.toggle("hidden", !dark);
+  // Hinter dem schwarzen Bildschirm die eigene Vorschau anhalten (spart Akku; gesendet wird weiter).
+  const lv = $("local-video");
+  if (dark && !lv.paused) lv.pause();
+  else if (!dark && lv.paused && lv.srcObject) lv.play().catch(() => {});
 }
 // Tippen auf den Hinweis schaltet den Ton frei.
 $("child-unmute").addEventListener("click", () => {
@@ -1332,7 +1387,7 @@ const par = {
   noAudio: false,
   mic: null, cam: null, talkTrack: null, voice: null, talkOn: false, videoOn: false, busyTalk: false, busyVideo: false,
   rotation: 0, muted: false,
-  eco: false, videoFrozen: false,
+  eco: false, videoFrozen: false, frozenReconnects: 0,
 };
 
 function startParent(room) {
@@ -1345,7 +1400,7 @@ function startParent(room) {
   setRoomLabels(room);
   par.rotation = Number(store.get("babyphone_rot_" + room)) || 0;
   par.eco = store.get("babyphone_parent_eco") === "1";
-  par.videoFrozen = false;
+  par.videoFrozen = false; par.frozenReconnects = 0;
   updateEcoUI();
   applyRotation();
   initVolumeUI();
@@ -1554,6 +1609,14 @@ async function pollStats(pc) {
   if (!videoExpected || frames > st.frames) { st.frameStall = 0; st.frames = frames; } else st.frameStall++;
   const frozen = videoExpected && st.frameStall >= 4;
   if (frozen !== par.videoFrozen) { par.videoFrozen = frozen; updateVideoOff(); }
+  if (frames > 30 && st.frameStall === 0) par.frozenReconnects = 0;   // Bild fließt wieder richtig
+  // Bild steht dauerhaft, Ton läuft: frische Verbindung aufbauen (höchstens 3-mal am Stück).
+  if (videoExpected && st.frameStall >= 10 && par.frozenReconnects < 3) {
+    par.frozenReconnects++;
+    log("Bild steht – verbinde neu");
+    scheduleReconnect(0);
+    return;
+  }
   else if (!$("video-off").classList.contains("hidden")) updateNightView();
 }
 function showLevel(rms) {
@@ -1779,7 +1842,7 @@ async function toggleParentVideo() {
     await setParentSendTrack("video", par.videoOn && par.cam ? par.cam.getVideoTracks()[0] : null);
     if (!par.videoOn) { stopStream(par.cam); par.cam = null; $("parent-self-video").srcObject = null; }
     publishParentFlags();
-    if (par.videoOn && !control.showParentVideoOnChild) toast("Hinweis: „Mein Video beim Kind zeigen“ ist im Menü ausgeschaltet.", 5000);
+    if (par.videoOn && !control.showParentVideoOnChild) toast("Hinweis: „Mein Bild zeigen“ ist unter Steuern ausgeschaltet – das Babybett zeigt dein Video nicht.", 6000);
     playRemoteAudio();
   } finally {
     par.busyVideo = false;
@@ -1792,7 +1855,8 @@ function updateParentVideoUI() {
 
 async function setParentSendTrack(kind, track) {
   const s = senderOf(par.pc, kind);
-  if (s) await quiet(s.replaceTrack(track));
+  // Zeitlimit: hängt der Tausch (z.B. Verbindung bricht gerade ab), bleibt der Knopf trotzdem bedienbar.
+  if (s) await withTimeout(quiet(s.replaceTrack(track)), 3000, null);
 }
 async function attachParentSendTracks(pc) {
   const a = senderOf(pc, "audio"), v = senderOf(pc, "video");
@@ -1843,7 +1907,7 @@ function syncRemoteControlsUI() {
   setIfIdle($("rc-quality"), "value", control.quality);
   setIfIdle($("rc-child-volume"), "value", control.childVolume);
   setRangeFill($("rc-child-volume"));
-  $("rc-volume-value").textContent = control.childVolume + " %";
+  if ($("rc-child-volume") !== active) $("rc-volume-value").textContent = control.childVolume + " %";
 
   const cs = roomData.childState || {};
   const cams = Array.isArray(roomData.cameras) ? roomData.cameras : [];
@@ -1875,6 +1939,7 @@ function syncRemoteControlsUI() {
       cs.audioOn !== (control.childAudioEnabled !== false) || cs.powerSave !== !!control.powerSave ||
       cs.childVolume !== control.childVolume || camPending;
     if (camPending && cs.cameraError) { el.textContent = "Diese Kamera ließ sich am Babybett nicht öffnen."; el.classList.add("warn"); }
+    else if (cs.badCamera && !pending) { el.textContent = `„${cs.badCamera}“ liefert kein Bild – das Babybett hat auf eine andere Kamera gewechselt.`; el.classList.add("warn"); }
     else if (pending) el.textContent = "Wird übertragen…";
     else { el.textContent = "✓ Babybett ist auf dem aktuellen Stand."; el.classList.add("ok"); }
   }
@@ -1954,6 +2019,7 @@ function stopSession() {
   if (child.connUnsub) { try { child.connUnsub(); } catch (e) {} child.connUnsub = null; }
   [...child.peers.keys()].forEach(id => closeChildPeer(id, s.mode === "send" ? s.room : null));
   clearTimeout(child.micRetry);
+  clearInterval(child.camWatch); child.camWatch = null;
   stopStream(child.stream);
   child.stream = child.audio = child.video = null;
   child.hasVideo = false;
@@ -2002,7 +2068,7 @@ document.addEventListener("visibilitychange", () => {
   requestWakeLock();
   if (isChild()) {
     childEnqueue(recoverChildMedia);
-    $("local-video").play().catch(() => {});
+    updateParentStage();   // startet die Vorschau wieder – außer im Stromsparmodus
     child.peers.forEach(p => { if (p.talk) playParentAudio(p); });
   }
   if (isParent()) {
