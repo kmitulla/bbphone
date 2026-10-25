@@ -13,31 +13,34 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
 ## Was kann die App?
 
 - 🔐 **Anmelden** mit E-Mail + Passwort (über Firebase). Nutzer legst du selbst in der Firebase-Konsole an.
-- 🏠 **Sichtbare Raumliste**: Beide Geräte tippen einfach denselben Raum an – kein Vertippen mehr.
+- 🏠 **Sichtbare Raumliste** mit Anzeige, ob gerade ein Babybett sendet und wie viele Eltern zuschauen.
 - 🔗 **Lesezeichen-Links**: Ein Tipp genügt (z.B. `?room=kinderzimmer&mode=send`).
 - 📱 **Als App speichern**: Eigenes App-Icon, lässt sich aufs iPhone-Startbild legen.
-- 🖥️ **Empfangen** zeigt das Video groß und bildschirmfüllend.
-- 🔊 **Großer Lautstärke-Regler** am Eltern-Gerät.
-- 🎤 **Eltern können sprechen** (Knopf „Sprechen"), das Kind-Gerät gibt die Stimme aus.
-- 📹 **Eltern-Video**: Eltern können ihre eigene Kamera anschalten – das Kind-Gerät zeigt es **groß**;
-  bei mehreren Eltern automatisch als **Splitscreen**.
-- 🟢 **Anwesenheit**: In der Raumliste und im Raum wird angezeigt, ob schon ein Babybett (👶) oder
-  Eltern (👀) im Raum sind.
-- ✨ **Modernes „Liquid-Glass"-Design** (iOS-Stil, dunkel/nachttauglich), echte SVG-Icons statt Emojis.
-- 🎛️ **Volle Fernsteuerung** vom Eltern-Gerät – inkl. **Kamera-Auswahl** am Kind-Gerät.
-- 🔁 **Bild drehen** am Eltern-Gerät (90° / 180° / 270°).
+- 🖥️ **Empfangen** zeigt das Video groß, dazu eine kleine **Pegelanzeige** (zeigt Geräusche am Babybett).
+- 🎤 **Eltern können sprechen** (Knopf „Sprechen"), das Kind-Gerät zeigt „Mama spricht…" und gibt die Stimme aus.
+  Mehrere Eltern gleichzeitig funktionieren. Das Mikrofon wird beim Ausschalten wirklich freigegeben.
+- 📹 **Eltern-Video**: Das Kind-Gerät zeigt es **groß**, bei mehreren Eltern als **Splitscreen**.
+- 🎛️ **Fernsteuerung vom Eltern-Gerät**: Kamera wählen, Video an/aus, Videoqualität, Eltern-Video
+  zeigen/verbergen, Lautstärke der Elternstimme. Das Menü zeigt, ob die Einstellung **am Babybett angekommen** ist.
+- 💾 **Einstellungen bleiben erhalten** – auch wenn weitere Eltern dazukommen oder das Babybett neu startet.
+- 📷 **Video aus** wird bei den Eltern klar angezeigt (kein eingefrorenes Standbild, das live aussieht).
+- 🔁 **Automatisch neu verbinden** – auch wenn die Verbindung „hängt", das Babybett neu startet
+  oder ein Versuch scheitert. Bricht nur der Ton weg, warnt die App: „Verbunden – aber kein Ton!".
+- 🎙️ **Mikrofon/Kamera starten von selbst neu**, wenn das System sie kurz wegnimmt (z.B. Anruf).
 - 🧑‍🤝‍🧑 **Anwesenheit mit Namen** (Anmeldename + Rolle: Babybett oder Eltern).
-- 🔊 **Hintergrund-Ton-Option** (experimentell; auf dem iPhone vom System eingeschränkt).
-- 🎛️ **Fernsteuerung vom Eltern-Gerät**: Video des Kind-Geräts an/aus, Videoqualität,
-  ob das Eltern-Video beim Kind sichtbar ist, und die Lautstärke der Elternstimme am Kind-Gerät.
-- 📊 **Videoqualität einstellbar** (Niedrig/Mittel/Hoch) – auch per Fernsteuerung, um Daten zu sparen.
-- 🔄 **Alle Kameras wählbar** (z.B. alle iPhone-Kameras) + Schnell-Umschalter Front/Rück.
+- 🚦 **Nur ein Babybett pro Raum**: Startet ein zweites Gerät, fragt die App, ob es übernehmen soll.
+- 🔄 **Bild drehen** am Eltern-Gerät (wird pro Raum gemerkt).
 - 🚫 **Kein versehentliches Auflegen** – Beenden nur über das Menü (⚙︎ oben links) + Nachfrage.
-- 🔁 **Automatisch neu verbinden**, wenn das WLAN kurz weg ist.
 - ☀️ **Bildschirm bleibt an** (Wake Lock), solange die Babyphone-Ansicht offen ist.
-- 🌙 **„Display aus"** am Babybett-Handy (schwarzer Bildschirm, Ton + Video laufen weiter, spart Akku).
-- 👨‍👩‍👧 **Mehrere Eltern-Geräte** gleichzeitig im selben Raum möglich.
-- 🟢 **Statusanzeige**: „Verbunden" / „Verbinde…" / „Getrennt, versuche erneut…".
+- 🌙 **„Display aus"** am Babybett-Handy (schwarzer Bildschirm, Ton + Video laufen weiter).
+- ✨ **„Liquid-Glass"-Design** (iOS-Stil, dunkel/nachttauglich).
+
+> **iPhone/iPad:** Apple erlaubt Webseiten nicht, die Lautstärke per Regler zu ändern. Am iPhone stellst
+> du die Lautstärke darum mit den **Tasten am Gerät** ein; der Lautsprecher-Knopf schaltet stumm.
+> Auf Android/Computer gibt es den Regler.
+
+> **Wichtig:** Beide Geräte müssen die App **im Vordergrund** offen haben (Display an, am besten am Ladekabel).
+> Sperrst du das iPhone oder wechselst die App, stoppt iOS Kamera/Ton. Beim Zurückkommen verbindet sich die App neu.
 
 > **Hinweis zur Anmeldung:** Beide Geräte müssen angemeldet sein, aber **nicht zwingend mit
 > demselben Konto**. Wichtig ist nur derselbe **Raum**.
@@ -70,11 +73,13 @@ Deine Firebase-Config steckt **schon eingesetzt** oben in `app.js`.
 - Unten: 🔄 Kamera (Front/Rück), 📷 Video an/aus, 🌙 Display aus (läuft weiter).
 
 **Am Eltern-Gerät:**
-- Unten Mitte: **Lautstärke-Regler**.
+- Unten: **Lautstärke** (Regler; am iPhone die Tasten) + Lautsprecher-Knopf = stumm.
+- Oben neben „Verbunden": **Pegelanzeige** – schlägt aus, wenn es am Babybett laut wird.
 - 🎤 **Sprechen** antippen → das Kind hört eure Stimme (nochmal tippen = aus).
-- 📹 **Mein Video** antippen → das Kind sieht eure Kamera eingeblendet.
-- ⚙︎ **Steuern**: das Babybett fernsteuern – Video an/aus, Qualität (Daten sparen),
+- 📹 **Mein Video** antippen → das Kind sieht eure Kamera groß.
+- ⚙︎ **Steuern**: das Babybett fernsteuern – Kamera, Video an/aus, Qualität (Daten sparen),
   euer Video beim Kind zeigen/verbergen, Lautstärke eurer Stimme am Kind-Gerät.
+  Oben im Menü steht, ob die Einstellung am Babybett angekommen ist (✓).
 
 ---
 
@@ -224,18 +229,31 @@ Speichere diese Links als **Lesezeichen** oder lege sie als **Symbol auf dem Sta
 
 ---
 
-## Teil E: STUN an-/abschalten (für VPN)
+## Teil E: STUN / TURN (Verbindungs-Helfer)
 
 Ganz oben in `app.js` steht:
 
 ```js
 const NUTZE_STUN = true;
+const TURN = { urls: [], username: "", credential: "" };
 ```
 
-- `true`  = Googles öffentlicher STUN wird benutzt (Standard, funktioniert fast überall).
-- `false` = **kein** STUN. Nimm das, wenn du **rein im VPN** bleiben willst.
+- `NUTZE_STUN = true`  = öffentliche STUN-Server werden benutzt (Standard, funktioniert fast überall).
+- `NUTZE_STUN = false` = **kein** STUN. Nimm das, wenn du **rein im VPN** bleiben willst.
+- `TURN` = optional ein **eigener TURN-Server** (z.B. `coturn` auf deinem eigenen Server).
+  Den brauchst du nur, wenn die Geräte **ohne VPN in verschiedenen Netzen** sind (z.B. Eltern im
+  Mobilfunk) und die Verbindung dann nicht zustande kommt. Beispiel:
+  ```js
+  const TURN = {
+    urls: ["turn:turn.meinserver.de:3478?transport=udp", "turn:turn.meinserver.de:3478?transport=tcp"],
+    username: "babyphone", credential: "geheimes-passwort"
+  };
+  ```
 
 Nach einer Änderung die Datei speichern und neu hochladen (push).
+
+**Fehlersuche:** In der Browser-Konsole zeigt `babyphoneDebug.info()` den aktuellen Zustand
+(Verbindungen, Fernsteuerung, Kamera).
 
 ---
 
@@ -258,11 +276,12 @@ Teste in dieser Reihenfolge:
 - [ ] **Videoqualität** umstellen (am Kind-Gerät und per Fernsteuerung am Eltern-Gerät).
 - [ ] **🎤 Sprechen** am Eltern-Gerät – das Kind-Gerät zeigt „Eltern sprechen…" und gibt die Stimme aus.
 - [ ] **📹 Mein Video** am Eltern-Gerät – das Kind-Gerät blendet das Eltern-Video ein.
-- [ ] **⚙︎ Steuern**: Video des Kind-Geräts an/aus, Eltern-Video zeigen/verbergen, Lautstärke der Elternstimme.
+- [ ] **⚙︎ Steuern**: Kamera wählen, Video des Kind-Geräts an/aus, Eltern-Video zeigen/verbergen, Lautstärke der Elternstimme – jeweils erscheint „✓ Babybett ist auf dem aktuellen Stand".
 - [ ] **„Display aus"** am Kind-Gerät – Ton/Video laufen beim Eltern-Gerät weiter.
 - [ ] Eltern-Bildschirm geht **nicht** von selbst aus (Wake Lock).
 - [ ] **Zweites Eltern-Gerät** dazu – beide sehen gleichzeitig das Bild.
 - [ ] WLAN am Eltern-Gerät kurz aus/an – es verbindet sich **automatisch neu**.
+- [ ] Babybett-Seite neu laden und wieder SENDEN – die Eltern verbinden sich **von selbst** neu.
 - [ ] **Beenden** nur über das Menü (⚙︎ oben links) + Nachfrage.
 - [ ] (iPhone) Über Safari **„Zum Home-Bildschirm"** – Icon erscheint, App öffnet im Vollbild.
 
@@ -284,7 +303,15 @@ Teste in dieser Reihenfolge:
 
 **Kein Ton beim Empfänger.**
 - Einmal auf den Bildschirm tippen (Browser blockieren Ton ohne Tippen).
-- Lautstärke-Regler aufdrehen.
+- Lautstärke aufdrehen (am iPhone mit den Tasten) und prüfen, dass der Lautsprecher-Knopf nicht durchgestrichen ist.
+- Steht oben „Verbunden – aber kein Ton!", ist am Babybett das Mikrofon weg (z.B. durch einen Anruf).
+  Die App versucht es selbst neu zu starten; sonst am Babybett einmal aufs Display tippen.
+
+**Bringt es etwas, die App auf einem eigenen Server zu hosten?**
+- Für die Stabilität **nein**. Die Webseite selbst (GitHub Pages) lädt nur einmal beim Start. Bild und Ton laufen
+  direkt zwischen den Geräten, die Verbindungsdaten über Firebase.
+- Was bei Problemen **außerhalb des VPN** (z.B. Mobilfunk) wirklich hilft, ist ein **eigener TURN-Server**
+  (`coturn`) auf deinem Server – siehe Teil E.
 
 **Akku am Babybett-Handy schonen.**
 - „Bildschirm aus" antippen. Ton + Video laufen weiter, der Bildschirm wird schwarz.

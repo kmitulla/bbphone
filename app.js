@@ -4,9 +4,26 @@
    Kind-Gerät (Babybett)  = sendet Ton + Video.
    Eltern-Gerät           = empfängt; kann zusätzlich:
        - sprechen (Mikro), eigenes Video zeigen
-       - das Kind-Gerät fernsteuern (Video an/aus, Qualität,
-         eigenes Video sichtbar, Lautstärke der Elternstimme)
-   Verbindung: WebRTC peer-to-peer. Signaling über Firestore.
+       - das Kind-Gerät fernsteuern (Kamera, Video an/aus,
+         Qualität, Eltern-Video sichtbar, Lautstärke)
+   Verbindung: WebRTC peer-to-peer. Signaling + Fernsteuerung
+   über Firestore.
+
+   Datenmodell in Firestore:
+     rooms/{raum}                   control (Fernsteuerung), cameras,
+                                    childState (was das Kind gerade macht),
+                                    sender (welches Gerät gerade sendet)
+     rooms/{raum}/presence/{id}     Wer ist da (mit Herzschlag)
+     rooms/{raum}/connections/{id}  Eine Verbindung Eltern <-> Kind
+        …/callerCandidates          Netzwerk-Adressen vom Kind
+        …/calleeCandidates          Netzwerk-Adressen der Eltern
+
+   Ablauf einer Verbindung:
+     1. Eltern legen ein connections-Dokument an.
+     2. Das Kind sieht es, baut die Verbindung und schreibt ein "offer".
+     3. Die Eltern antworten mit einer "answer" -> verbunden.
+     Bricht etwas ab, löschen die Eltern ihr Dokument und legen
+     ein neues an. Das Kind räumt veraltete Dokumente selbst weg.
    =========================================================== */
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -15,8 +32,8 @@ import {
   onAuthStateChanged, setPersistence, browserLocalPersistence
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
-  getDocs, onSnapshot, serverTimestamp, query, where, Timestamp
+  getFirestore, collection, doc, setDoc, updateDoc, deleteDoc, getDoc, getDocs,
+  onSnapshot, serverTimestamp, writeBatch, enableNetwork, disableNetwork
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 /* ===========================================================
@@ -35,22 +52,50 @@ const firebaseConfig = {
    2) EINSTELLUNGEN
    =========================================================== */
 
-// STUN: true = Googles STUN benutzen (Standard). false = rein im VPN.
+// STUN: true = öffentliche STUN-Server benutzen (Standard). false = rein im VPN.
 const NUTZE_STUN = true;
-const STUN_SERVER = "stun:stun.l.google.com:19302";
+const STUN_SERVERS = [
+  "stun:stun.l.google.com:19302",
+  "stun:stun1.l.google.com:19302",
+  "stun:stun.cloudflare.com:3478",
+];
 
-// Alte, liegengebliebene Verbindungs-Einträge nach so vielen Minuten löschen:
-const ALTE_EINTRAEGE_LOESCHEN_NACH_MIN = 60;
+// Optional: eigener TURN-Server (z.B. "coturn" auf deinem eigenen Server).
+// Hilft, wenn die Geräte in verschiedenen Netzen OHNE VPN sind (z.B. Mobilfunk).
+// Leer lassen = aus. Beispiel:
+//   urls: ["turn:turn.meinserver.de:3478?transport=udp", "turn:turn.meinserver.de:3478?transport=tcp"],
+//   username: "babyphone", credential: "geheimes-passwort"
+const TURN = { urls: [], username: "", credential: "" };
 
-// Videoqualität-Stufen (Breite/Höhe/Bilder pro Sekunde):
+// Videoqualität-Stufen (Bildgröße, Bilder pro Sekunde, maximale Datenrate):
 const QUALITY = {
-  low:    { width: 320,  height: 240, frameRate: 15 },
-  medium: { width: 640,  height: 480, frameRate: 24 },
-  high:   { width: 1280, height: 720, frameRate: 30 },
+  low:    { width: 320,  height: 240, frameRate: 15, maxBitrate: 150000 },
+  medium: { width: 640,  height: 480, frameRate: 24, maxBitrate: 600000 },
+  high:   { width: 1280, height: 720, frameRate: 30, maxBitrate: 2000000 },
 };
 
+// Mikrofon: Echo-Unterdrückung ist nötig, damit die Elternstimme nicht zurückhallt.
+const AUDIO_CONSTRAINTS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+
+// Zeiten (Millisekunden bzw. Sekunden)
+const PRESENCE_BEAT_MS = 20000;            // Herzschlag "ich bin da"
+const PRESENCE_FRESH_MS = 50000;           // so lange gilt ein Eintrag als anwesend
+const PRESENCE_DELETE_MS = 6 * 3600 * 1000; // uralte Einträge aufräumen
+const CHILD_PEER_TIMEOUT_MS = 30000;       // Kind: Verbindung muss nach 30 s stehen
+const CHILD_DISCONNECT_CLEANUP_MS = 10000; // Kind: abgerissene Verbindung aufräumen
+const PARENT_CONNECT_TIMEOUT_MS = 20000;   // Eltern: nach dem Angebot 20 s Zeit
+const PARENT_OFFER_WAIT_MS = 10000;        // Eltern: Babybett da, aber kein Angebot -> neu
+const DISCONNECT_GRACE_MS = 4000;          // kurze Aussetzer abwarten
+const STALL_RECONNECT_S = 6;               // so lange gar keine Daten -> neu verbinden
+const NO_AUDIO_WARN_S = 5;                 // so lange kein Ton -> Warnung
+
 function rtcConfig() {
-  return { iceServers: NUTZE_STUN ? [{ urls: STUN_SERVER }] : [] };
+  const iceServers = [];
+  if (NUTZE_STUN) iceServers.push({ urls: STUN_SERVERS });
+  if (TURN.urls && TURN.urls.length) {
+    iceServers.push({ urls: TURN.urls, username: TURN.username, credential: TURN.credential });
+  }
+  return { iceServers };
 }
 
 /* ===========================================================
@@ -64,17 +109,73 @@ setPersistence(auth, browserLocalPersistence).catch(() => {});
 /* ===========================================================
    4) Kleine Helfer
    =========================================================== */
+const $ = (id) => document.getElementById(id);
+
 const screens = {
-  login: document.getElementById("login-screen"),
-  home: document.getElementById("home-screen"),
-  child: document.getElementById("child-screen"),
-  parent: document.getElementById("parent-screen"),
+  splash: $("splash-screen"),
+  login: $("login-screen"),
+  home: $("home-screen"),
+  child: $("child-screen"),
+  parent: $("parent-screen"),
 };
 function showScreen(name) {
   Object.values(screens).forEach(s => s.classList.remove("active"));
   screens[name].classList.add("active");
 }
-function $(id) { return document.getElementById(id); }
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+function withTimeout(promise, ms, fallback) {
+  return Promise.race([Promise.resolve(promise), sleep(ms).then(() => fallback)]).catch(() => fallback);
+}
+function randomId(len = 12) {
+  const a = new Uint8Array(len);
+  crypto.getRandomValues(a);
+  return Array.from(a, b => (b % 36).toString(36)).join("");
+}
+function log(...args) { console.warn("[Babyphone]", ...args); }
+function quiet(p) { return Promise.resolve(p).catch(e => { log(e); }); }
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+function throttle(fn, ms) {
+  let last = 0, timer = null, lastArgs = null;
+  return (...args) => {
+    lastArgs = args;
+    const wait = ms - (Date.now() - last);
+    if (wait <= 0) { last = Date.now(); fn(...args); return; }
+    clearTimeout(timer);
+    timer = setTimeout(() => { last = Date.now(); fn(...lastArgs); }, wait);
+  };
+}
+function stopStream(s) { if (s) s.getTracks().forEach(t => { try { t.stop(); } catch (e) {} }); }
+function getMedia(constraints) {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    const e = new Error("getUserMedia fehlt (nur über https:// oder localhost möglich)");
+    e.name = "NotSupportedError";
+    return Promise.reject(e);
+  }
+  return navigator.mediaDevices.getUserMedia(constraints);
+}
+
+let toastTimer = null;
+function toast(msg, ms = 3500) {
+  const el = $("toast");
+  el.textContent = msg;
+  el.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add("hidden"), ms);
+}
+
+function setStatus(elId, text, kind) {
+  const el = $(elId); if (!el) return;
+  el.textContent = text;
+  el.classList.remove("connected", "connecting", "disconnected", "warning");
+  if (kind) el.classList.add(kind);
+}
+function setRoomLabels(room) {
+  document.querySelectorAll(".room-name-label").forEach(el => { el.textContent = "· " + room; });
+}
 
 /* ===========================================================
    SVG-Icons (iOS-Stil, keine Emojis)
@@ -86,12 +187,14 @@ const ICON = {
   eye: SVG('<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>'),
   flip: SVG('<path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>'),
   video: SVG('<rect x="1" y="5" width="15" height="14" rx="3"/><path d="M23 7l-7 5 7 5V7z"/>'),
+  "video-off": SVG('<path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10"/><line x1="1" y1="1" x2="23" y2="23"/>'),
   mic: SVG('<path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>'),
   gear: SVG('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'),
   sliders: SVG('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
   rotate: SVG('<polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>'),
   "volume-low": SVG('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>'),
   "volume-high": SVG('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>'),
+  "volume-off": SVG('<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>'),
   trash: SVG('<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>'),
   door: SVG('<path d="M3 21h18"/><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><circle cx="14.5" cy="12" r="1" fill="currentColor" stroke="none"/>'),
   person: SVG('<path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>'),
@@ -107,30 +210,74 @@ injectIcons();
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 }
-let roomCameras = [];   // vom Kind-Gerät gemeldete Kameras (für die Fernsteuerung)
 
-/* Ton-Freischaltung: iPhone erlaubt Ton-Wiedergabe erst nach einem Tipp. */
-let sharedAudioCtx = null;
-function unlockMedia() {
+// Stabile Geräte-Kennung (bleibt auf diesem Gerät gleich).
+const DEVICE_ID = (() => {
+  let id = store.get("babyphone_device_id");
+  if (!id) { id = "d" + randomId(10); store.set("babyphone_device_id", id); }
+  return id;
+})();
+
+function myName() {
+  const u = auth.currentUser;
+  return (u && u.email) ? u.email.split("@")[0] : "Gerät";
+}
+
+// iPhone/iPad: Die Lautstärke von Medien lässt sich per Code NICHT ändern
+// (nur mit den Tasten). Das prüfen wir, statt einen wirkungslosen Regler zu zeigen.
+const CAN_SET_VOLUME = (() => {
+  try { const a = document.createElement("audio"); a.volume = 0.5; return Math.abs(a.volume - 0.5) < 0.01; }
+  catch (e) { return false; }
+})();
+
+/* Ton-Freischaltung: iPhone erlaubt Ton erst nach einem echten Tipp. */
+let audioCtx = null;
+function unlockAudio() {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
-    if (!sharedAudioCtx) sharedAudioCtx = new Ctx();
-    if (sharedAudioCtx.state === "suspended") sharedAudioCtx.resume();
-    const o = sharedAudioCtx.createOscillator(), g = sharedAudioCtx.createGain();
-    g.gain.value = 0.00001; o.connect(g); g.connect(sharedAudioCtx.destination);
-    o.start(); o.stop(sharedAudioCtx.currentTime + 0.03);
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state !== "running") audioCtx.resume().catch(() => {});
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    g.gain.value = 0.0001; o.connect(g); g.connect(audioCtx.destination);
+    o.start(); o.stop(audioCtx.currentTime + 0.05);
   } catch (e) {}
 }
-
-function setStatus(elId, text, kind) {
-  const el = $(elId); if (!el) return;
-  el.textContent = text;
-  el.classList.remove("connected", "connecting", "disconnected");
-  if (kind) el.classList.add(kind);
+// Medien-Elemente im Tipp einmal "anstoßen" -> später darf das iPhone sie mit Ton abspielen.
+function primeMediaElements(els) {
+  els.forEach(el => { try { const p = el.play(); if (p && p.catch) p.catch(() => {}); } catch (e) {} });
 }
 
-// Standard-Fernsteuerung (Werte im Raum-Dokument):
+/* Bildschirm wach halten */
+let wakeLock = null;
+async function requestWakeLock() {
+  if (!session || !("wakeLock" in navigator) || document.visibilityState !== "visible") return;
+  if (wakeLock) return;
+  try {
+    const lock = await navigator.wakeLock.request("screen");
+    wakeLock = lock;
+    lock.addEventListener("release", () => {
+      if (wakeLock === lock) wakeLock = null;
+      if (session && document.visibilityState === "visible") setTimeout(requestWakeLock, 1000);
+    });
+  } catch (e) { log("WakeLock", e); }
+}
+function releaseWakeLock() {
+  const lock = wakeLock; wakeLock = null;
+  if (lock) lock.release().catch(() => {});
+}
+
+/* Firestore-Pfade */
+const roomRef = (room) => doc(db, "rooms", room);
+const presenceCol = (room) => collection(db, "rooms", room, "presence");
+const connsCol = (room) => collection(db, "rooms", room, "connections");
+const connRef = (room, id) => doc(db, "rooms", room, "connections", id);
+
+function ensureRoom(room) {
+  return quiet(setDoc(roomRef(room), { name: room, lastActive: serverTimestamp() }, { merge: true }));
+}
+
+// Standard-Fernsteuerung (Werte im Raum-Dokument, Feld "control"):
 function defaultControl() {
   return { childVideoEnabled: true, quality: "medium", showParentVideoOnChild: true, childVolume: 80, cameraId: "" };
 }
@@ -138,8 +285,11 @@ function defaultControl() {
 /* ===========================================================
    5) Anmelden / Abmelden
    =========================================================== */
-$("login-btn").addEventListener("click", doLogin);
-$("password").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+let session = null;     // laufendes Babyphone: { mode: "send"|"receive", room, id }
+const isChild = () => !!session && session.mode === "send";
+const isParent = () => !!session && session.mode === "receive";
+
+$("login-form").addEventListener("submit", (e) => { e.preventDefault(); doLogin(); });
 
 async function doLogin() {
   const email = $("email").value.trim();
@@ -149,187 +299,212 @@ async function doLogin() {
   $("login-btn").disabled = true;
   try {
     await signInWithEmailAndPassword(auth, email, pass);
+    $("password").value = "";
   } catch (err) {
-    $("login-error").textContent = "Anmeldung fehlgeschlagen. E-Mail oder Passwort falsch?";
+    $("login-error").textContent = loginErrorText(err);
   } finally {
     $("login-btn").disabled = false;
   }
 }
-$("logout-btn").addEventListener("click", () => signOut(auth));
+function loginErrorText(err) {
+  const c = (err && err.code) || "";
+  if (c === "auth/network-request-failed") return "Keine Internetverbindung. Bitte erneut versuchen.";
+  if (c === "auth/too-many-requests") return "Zu viele Versuche. Bitte kurz warten.";
+  if (c === "auth/invalid-email") return "Die E-Mail-Adresse ist ungültig.";
+  if (c === "auth/user-disabled") return "Dieses Konto ist gesperrt.";
+  if (c === "auth/operation-not-allowed") return "E-Mail-Anmeldung ist in Firebase nicht eingeschaltet.";
+  return "Anmeldung fehlgeschlagen. E-Mail oder Passwort falsch?";
+}
 
+$("logout-btn").addEventListener("click", () => { quiet(signOut(auth)); });
+
+let urlHandled = false;
 onAuthStateChanged(auth, (user) => {
-  try {
-    if (user) {
-      startRoomListListener();
-      // Immer zuerst die sichtbare Übersicht zeigen (nie ein schwarzer Bildschirm).
-      showScreen("home");
-      // Bei einem Lesezeichen-Link erscheint darüber ein großer "Starten"-Knopf.
-      handleUrlAutostart();
-    } else {
-      stopRoomListListener();
-      stopEverything();
-      showScreen("login");
-    }
-  } catch (e) {
-    // Im Zweifel auf einer sichtbaren Seite landen.
-    showScreen(user ? "home" : "login");
+  if (user) {
+    $("user-line").textContent = "Angemeldet als " + (user.email || "Gerät");
+    startRoomList();
+    if (!session) showScreen("home");
+    if (!urlHandled) { urlHandled = true; handleUrlAutostart(); }
+  } else {
+    stopRoomList();
+    stopSession();
+    showScreen("login");
   }
 });
 
 /* ===========================================================
    6) Raumliste (sichtbare Räume zum Antippen)
    =========================================================== */
+const roomItems = new Map();   // name -> { el, docs, unsub }
 let roomListUnsub = null;
-let roomPresenceUnsubs = [];
+let roomListTimer = null;
 
-function startRoomListListener() {
+function startRoomList() {
   if (roomListUnsub) return;
   roomListUnsub = onSnapshot(collection(db, "rooms"), (snap) => {
-    const list = $("room-list");
-    const rooms = snap.docs.map(d => d.id).sort();
-    // alte Anwesenheits-Beobachter lösen
-    roomPresenceUnsubs.forEach(u => { try { u(); } catch (e) {} });
-    roomPresenceUnsubs = [];
-    list.innerHTML = "";
-    if (rooms.length === 0) {
-      list.innerHTML = '<p class="muted" id="room-empty">Noch keine Räume. Erstelle unten einen.</p>';
-      return;
+    $("room-error").classList.add("hidden");
+    const names = snap.docs.map(d => d.id).sort((a, b) => a.localeCompare(b));
+    // Weggefallene Räume entfernen
+    for (const [name, it] of roomItems) {
+      if (!names.includes(name)) { try { it.unsub(); } catch (e) {} it.el.remove(); roomItems.delete(name); }
     }
-    rooms.forEach(name => {
-      const item = document.createElement("div");
-      item.className = "room-item";
-      item.innerHTML = `<span class="name"><span class="ic" data-icon="door"></span> ${name}</span><span class="room-badge"></span><button class="del" title="Raum löschen">${ICON.trash}</button>`;
-      injectIcons(item);
-      item.querySelector(".name").addEventListener("click", () => selectRoom(name, item));
-      item.querySelector(".del").addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (confirm(`Raum "${name}" aus der Liste löschen?`)) deleteRoom(name);
-      });
-      list.appendChild(item);
-      // Anwesenheit pro Raum live anzeigen
-      const u = onSnapshot(collection(db, "rooms", name, "presence"), (psnap) => {
-        const c = countPresence(psnap.docs);
-        const badge = item.querySelector(".room-badge");
-        if (!badge) return;
-        const parts = [];
-        if (c.childrenCount > 0) parts.push(`<span class="on">${ICON.broadcast} aktiv</span>`);
-        if (c.parentsCount > 0) parts.push(`${ICON.eye} ${c.parentsCount}`);
-        badge.innerHTML = parts.join(" &nbsp; ");
-      });
-      roomPresenceUnsubs.push(u);
-    });
+    // Neue anlegen, Reihenfolge herstellen (bestehende Einträge bleiben erhalten -> kein Flackern)
+    const list = $("room-list");
+    names.forEach(name => list.appendChild((roomItems.get(name) || createRoomItem(name)).el));
+    $("room-empty").classList.toggle("hidden", names.length > 0);
+    markSelectedRoom();
+  }, (err) => {
+    log("Raumliste", err);
+    const el = $("room-error");
+    el.textContent = err && err.code === "permission-denied"
+      ? "Keine Berechtigung. Sind die Firestore-Regeln veröffentlicht?"
+      : "Raumliste konnte nicht geladen werden. Neuer Versuch…";
+    el.classList.remove("hidden");
+    stopRoomList();
+    setTimeout(() => { if (auth.currentUser) startRoomList(); }, 5000);
   });
+  // Anwesenheit veraltet auch ohne neue Daten -> regelmäßig neu anzeigen
+  roomListTimer = setInterval(() => roomItems.forEach(renderRoomBadge), 15000);
 }
-function stopRoomListListener() {
-  if (roomListUnsub) { roomListUnsub(); roomListUnsub = null; }
-  roomPresenceUnsubs.forEach(u => { try { u(); } catch (e) {} });
-  roomPresenceUnsubs = [];
+function stopRoomList() {
+  if (roomListUnsub) { try { roomListUnsub(); } catch (e) {} roomListUnsub = null; }
+  clearInterval(roomListTimer); roomListTimer = null;
+  roomItems.forEach(it => { try { it.unsub(); } catch (e) {} it.el.remove(); });
+  roomItems.clear();
 }
 
-function selectRoom(name, item) {
+function createRoomItem(name) {
+  const el = document.createElement("div");
+  el.className = "room-item";
+  el.innerHTML = '<span class="ic" data-icon="door"></span><span class="name"></span><span class="room-badge"></span>' +
+    '<button type="button" class="del" title="Raum löschen" aria-label="Raum löschen"><span data-icon="trash"></span></button>';
+  el.querySelector(".name").textContent = name;
+  injectIcons(el);
+  el.addEventListener("click", () => selectRoom(name));
+  el.querySelector(".del").addEventListener("click", (e) => { e.stopPropagation(); deleteRoom(name); });
+  const it = { name, el, docs: [], unsub: () => {} };
+  it.unsub = onSnapshot(presenceCol(name), (snap) => { it.docs = snap.docs; renderRoomBadge(it); }, (err) => log("Anwesenheit", err));
+  roomItems.set(name, it);
+  return it;
+}
+function renderRoomBadge(it) {
+  const c = readPresence(it.docs);
+  const parts = [];
+  if (c.children.length) parts.push(`<span class="on">${ICON.broadcast} aktiv</span>`);
+  if (c.parents.length) parts.push(`<span>${ICON.eye} ${c.parents.length}</span>`);
+  it.el.querySelector(".room-badge").innerHTML = parts.join("");
+}
+
+function selectRoom(name) {
   $("room").value = name;
-  document.querySelectorAll(".room-item").forEach(el => el.classList.remove("selected"));
-  if (item) item.classList.add("selected");
+  store.set("babyphone_room", name);
+  markSelectedRoom();
 }
-
-async function ensureRoom(name) {
-  // Raum-Dokument anlegen, falls es noch nicht existiert (mit Standard-Steuerung).
-  await setDoc(doc(db, "rooms", name),
-    { name, createdAt: serverTimestamp(), lastActive: serverTimestamp() },
-    { merge: true });
-  // Standardwerte nur setzen, wenn noch keine da sind:
-  const ref = doc(db, "rooms", name);
-  await setDoc(ref, { control: defaultControl() }, { merge: true }).catch(() => {});
+function markSelectedRoom() {
+  const cur = cleanRoomName($("room").value);
+  roomItems.forEach((it, name) => it.el.classList.toggle("selected", name === cur));
 }
+$("room").addEventListener("input", markSelectedRoom);
 
 async function deleteRoom(name) {
+  const it = roomItems.get(name);
+  const c = readPresence(it ? it.docs : []);
+  if (c.children.length || c.parents.length) {
+    alert(`Im Raum „${name}“ sind gerade Geräte aktiv.\nBitte dort zuerst beenden.`);
+    return;
+  }
+  if (!confirm(`Raum „${name}“ löschen?`)) return;
   try {
-    const connsRef = collection(db, "rooms", name, "connections");
-    const snap = await getDocs(connsRef);
-    await Promise.all(snap.docs.map(d => deleteConnectionDoc(name, d.id)));
-    await deleteDoc(doc(db, "rooms", name));
-  } catch (e) {}
+    const conns = await getDocs(connsCol(name));
+    await Promise.all(conns.docs.map(d => deleteConnDoc(name, d.id)));
+    const pres = await getDocs(presenceCol(name));
+    await Promise.all(pres.docs.map(d => deleteDoc(d.ref)));
+    await deleteDoc(roomRef(name));
+    if (cleanRoomName($("room").value) === name) $("room").value = "";
+  } catch (e) {
+    log(e);
+    toast("Löschen hat nicht geklappt. Internet da?");
+  }
 }
 
-$("create-room-btn").addEventListener("click", async () => {
+$("create-room-btn").addEventListener("click", () => {
   const name = cleanRoomName($("room").value);
-  if (!name) { alert("Bitte zuerst einen Raumnamen eingeben."); return; }
-  $("room").value = name;
-  await ensureRoom(name);
+  if (!name) { toast("Bitte zuerst einen Raumnamen eingeben."); $("room").focus(); return; }
+  ensureRoom(name);
+  selectRoom(name);
+  toast(`Raum „${name}“ ist bereit.`);
 });
+
+function cleanRoomName(v) {
+  return (v || "").trim().toLowerCase()
+    .replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
+    .replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-").replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
 
 /* ===========================================================
    7) Start-Knöpfe + Lesezeichen-Links
    =========================================================== */
-const savedRoom = localStorage.getItem("babyphone_room");
+const savedRoom = store.get("babyphone_room");
 if (savedRoom) $("room").value = savedRoom;
 
-$("send-btn").addEventListener("click", () => { unlockMedia(); beginSession("send"); });
-$("receive-btn").addEventListener("click", () => { unlockMedia(); beginSession("receive"); });
+$("send-btn").addEventListener("click", () => startFromHome("send"));
+$("receive-btn").addEventListener("click", () => startFromHome("receive"));
 
-function cleanRoomName(v) {
-  return (v || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-").replace(/-+/g, "-");
+function startFromHome(mode) {
+  const room = cleanRoomName($("room").value);
+  if (!room) { toast("Bitte zuerst einen Raum antippen oder anlegen."); return; }
+  $("room").value = room;
+  launch(mode, room);
 }
 
-async function beginSession(mode) {
-  const room = cleanRoomName($("room").value);
-  if (!room) { alert("Bitte zuerst einen Raum auswählen oder anlegen."); return; }
-  localStorage.setItem("babyphone_room", room);
-  await ensureRoom(room);
+// Muss direkt im Tipp laufen: das iPhone erlaubt Ton/Kamera nur nach einem echten Tipp.
+function launch(mode, room) {
+  if (session) return;
+  unlockAudio();
+  if (mode === "receive") primeMediaElements([$("remote-audio"), $("remote-video")]);
+  store.set("babyphone_room", room);
   if (mode === "send") startChild(room);
   else startParent(room);
 }
 
-let pendingStart = null;   // gemerkter Lesezeichen-Start (room + mode)
+let pendingStart = null;    // gemerkter Lesezeichen-Start (room + mode)
+let gatePresenceUnsub = null;
 
 function handleUrlAutostart() {
   const params = new URLSearchParams(location.search);
   const room = cleanRoomName(params.get("room") || "");
   const mode = params.get("mode");
-  if (room && (mode === "send" || mode === "receive")) {
-    showStartGate(room, mode);
-    return true;
-  }
-  return false;
+  if (room && (mode === "send" || mode === "receive")) showStartGate(room, mode);
 }
 
-let gatePresenceUnsub = null;
-
-// Start-Tor zeigen: EIN bewusster Tipp – wichtig, damit das iPhone
-// danach Kamera/Mikrofon bzw. den Ton erlaubt (sonst schwarzer Bildschirm).
-// Zeigt außerdem an, wer schon im Raum ist.
+// Start-Tor: EIN bewusster Tipp (sonst blockiert das iPhone Kamera/Ton).
 function showStartGate(room, mode) {
   pendingStart = { room, mode };
-  $("start-gate-text").textContent =
-    (mode === "send" ? "📡 Senden" : "👀 Empfangen") + " · Raum: " + room;
-  $("start-gate-btn").textContent =
-    mode === "send" ? "📡 Senden starten" : "👀 Empfangen starten";
+  $("start-gate-text").textContent = (mode === "send" ? "Senden" : "Empfangen") + " · Raum: " + room;
+  $("start-gate-btn").textContent = mode === "send" ? "Senden starten" : "Empfangen starten";
   $("start-gate-presence").textContent = "";
   if (gatePresenceUnsub) { try { gatePresenceUnsub(); } catch (e) {} }
-  gatePresenceUnsub = onSnapshot(collection(db, "rooms", room, "presence"), (snap) => {
-    const c = countPresence(snap.docs);
+  gatePresenceUnsub = onSnapshot(presenceCol(room), (snap) => {
+    const c = readPresence(snap.docs);
     const parts = [];
-    if (c.childrenCount > 0) parts.push("Babybett ist aktiv: " + escapeHtml(c.children.join(", ")));
-    if (c.parentsCount > 0) parts.push(escapeHtml(c.parents.join(", ")) + " (Eltern)");
+    if (c.children.length) parts.push("Babybett ist aktiv: " + c.children.map(x => x.name).join(", "));
+    if (c.parents.length) parts.push(c.parents.map(x => x.name).join(", ") + " (Eltern)");
     $("start-gate-presence").textContent = parts.length ? parts.join("  ·  ") : "Noch niemand im Raum.";
-  });
+  }, (err) => log(err));
   $("start-gate").classList.remove("hidden");
 }
 function hideStartGate() {
   if (gatePresenceUnsub) { try { gatePresenceUnsub(); } catch (e) {} gatePresenceUnsub = null; }
   $("start-gate").classList.add("hidden");
 }
-
-$("start-gate-btn").addEventListener("click", async () => {
+$("start-gate-btn").addEventListener("click", () => {
   if (!pendingStart) return;
-  unlockMedia();
   const { room, mode } = pendingStart;
   pendingStart = null;
   hideStartGate();
-  localStorage.setItem("babyphone_room", room);
-  await ensureRoom(room);
-  if (mode === "send") startChild(room);
-  else startParent(room);
+  $("room").value = room;
+  launch(mode, room);
 });
 $("start-gate-home").addEventListener("click", () => {
   pendingStart = null;
@@ -339,662 +514,1224 @@ $("start-gate-home").addEventListener("click", () => {
 });
 
 /* ===========================================================
-   8) WebRTC-Werkzeuge
+   8) Raum-Dokument (Fernsteuerung) + Anwesenheit
    =========================================================== */
-function attachCandidateBuffer(pc) { pc._pending = []; pc._remoteSet = false; }
-async function addRemoteCandidate(pc, cand) {
-  if (pc._remoteSet) { try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) {} }
-  else pc._pending.push(cand);
-}
-async function flushCandidates(pc) {
-  pc._remoteSet = true;
-  for (const c of pc._pending) { try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch (e) {} }
-  pc._pending = [];
-}
-async function deleteConnectionDoc(roomName, connId) {
-  try {
-    const connRef = doc(db, "rooms", roomName, "connections", connId);
-    for (const sub of ["callerCandidates", "calleeCandidates"]) {
-      const snap = await getDocs(collection(connRef, sub));
-      await Promise.all(snap.docs.map(d => deleteDoc(d.ref)));
-    }
-    await deleteDoc(connRef);
-  } catch (e) {}
-}
-async function cleanupOldConnections(roomName) {
-  try {
-    const cutoff = Timestamp.fromMillis(Date.now() - ALTE_EINTRAEGE_LOESCHEN_NACH_MIN * 60 * 1000);
-    const connsRef = collection(db, "rooms", roomName, "connections");
-    const snap = await getDocs(query(connsRef, where("createdAt", "<", cutoff)));
-    await Promise.all(snap.docs.map(d => deleteConnectionDoc(roomName, d.id)));
-  } catch (e) {}
-}
-// Sender für eine bestimmte Spur-Art (audio/video) finden.
-function senderForKind(pc, kind) {
-  const tx = pc.getTransceivers().find(t =>
-    (t.receiver && t.receiver.track && t.receiver.track.kind === kind) ||
-    (t.sender && t.sender.track && t.sender.track.kind === kind));
-  return tx ? tx.sender : null;
-}
-
-/* ===========================================================
-   9) Wake Lock (Bildschirm wach halten)
-   =========================================================== */
-let wakeLock = null;
-async function requestWakeLock() {
-  try { if ("wakeLock" in navigator) wakeLock = await navigator.wakeLock.request("screen"); } catch (e) {}
-}
-function releaseWakeLock() { try { if (wakeLock) { wakeLock.release(); wakeLock = null; } } catch (e) {} }
-document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && currentSession) requestWakeLock();
-  // Hintergrund-Ton: AudioContext am Leben halten (so gut es das System erlaubt).
-  if (bgAudio && sharedAudioCtx && sharedAudioCtx.state === "suspended") sharedAudioCtx.resume().catch(() => {});
-});
-
-/* ===========================================================
-   10) Gemeinsamer Zustand
-   =========================================================== */
-let currentSession = null;       // { mode, room }
+let roomData = {};               // zuletzt gelesenes Raum-Dokument
 let control = defaultControl();  // aktuelle Fernsteuer-Werte
-let controlUnsub = null;
+let roomUnsub = null;
 
-// Auf Änderungen der Fernsteuerung im Raum-Dokument hören.
-function listenControl(roomName, onChange) {
-  if (controlUnsub) controlUnsub();
-  controlUnsub = onSnapshot(doc(db, "rooms", roomName), (snap) => {
-    const data = snap.data();
-    if (!data) return;
-    if (data.control) control = { ...defaultControl(), ...data.control };
-    if (Array.isArray(data.cameras)) roomCameras = data.cameras;
-    onChange();
+function listenRoom(room, onChange) {
+  stopRoomListener();
+  roomUnsub = onSnapshot(roomRef(room), (snap) => {
+    if (!session || session.room !== room) return;
+    roomData = snap.exists() ? (snap.data() || {}) : {};
+    control = { ...defaultControl(), ...(roomData.control || {}) };
+    if (!QUALITY[control.quality]) control.quality = "medium";
+    onChange(snap);
+  }, (err) => {
+    log("Raum", err);
+    setTimeout(() => { if (session && session.room === room) listenRoom(room, onChange); }, 3000);
   });
 }
-// Fernsteuerung ändern (vom Eltern-Gerät).
-async function setControl(patch) {
+function stopRoomListener() {
+  if (roomUnsub) { try { roomUnsub(); } catch (e) {} roomUnsub = null; }
+}
+
+// Fernsteuerung ändern. Mit merge werden nur die genannten Werte geändert,
+// alle anderen bleiben erhalten (früher wurde beim Betreten alles zurückgesetzt).
+function setControl(patch) {
+  if (!session) return;
   control = { ...control, ...patch };
-  if (!currentSession) return;
-  const dotted = {};
-  for (const k in patch) dotted["control." + k] = patch[k];
-  try { await updateDoc(doc(db, "rooms", currentSession.room), dotted); } catch (e) {}
+  quiet(setDoc(roomRef(session.room), { control: patch }, { merge: true }));
 }
 
-/* ===========================================================
-   10b) Anwesenheit – wer ist gerade als Kind/Eltern im Raum?
-   =========================================================== */
-// Stabile Geräte-Kennung, damit keine Karteileichen übrig bleiben.
-let myDeviceId = localStorage.getItem("babyphone_device_id");
-if (!myDeviceId) {
-  myDeviceId = "d" + Math.random().toString(36).slice(2, 12);
-  localStorage.setItem("babyphone_device_id", myDeviceId);
-}
+const presence = { ref: null, timer: null, refresh: null, unsub: null, docs: [] };
 
-let presenceUnsub = null;
-let presenceTimer = null;
-const PRESENCE_FRISCH_MS = 45000;   // so lange gilt ein Eintrag als "anwesend"
-
-// Eigene Anwesenheit melden (mit regelmäßigem "Herzschlag") + Raum beobachten.
-async function startPresence(room, role) {
-  stopPresenceHeartbeat();
-  const ref = doc(db, "rooms", room, "presence", myDeviceId);
-  const name = (auth.currentUser && auth.currentUser.email) ? auth.currentUser.email.split("@")[0] : "Gerät";
-  const beat = () => setDoc(ref, { role, name, updatedAt: serverTimestamp() }, { merge: true }).catch(() => {});
-  await beat();
-  presenceTimer = setInterval(beat, 20000);
-  presenceUnsub = onSnapshot(collection(db, "rooms", room, "presence"), (snap) => {
-    updatePresenceUI(countPresence(snap.docs));
-  });
-}
-function stopPresenceHeartbeat() {
-  if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
-  if (presenceUnsub) { try { presenceUnsub(); } catch (e) {} presenceUnsub = null; }
+function startPresence(room, role) {
+  stopPresence(null);
+  const ref = doc(db, "rooms", room, "presence", `${DEVICE_ID}_${role}`);
+  presence.ref = ref;
+  const beat = () => quiet(setDoc(ref, { role, name: myName(), device: DEVICE_ID, session: session ? session.id : "", updatedAt: serverTimestamp() }));
+  beat();
+  presence.timer = setInterval(beat, PRESENCE_BEAT_MS);
+  presence.unsub = onSnapshot(presenceCol(room), (snap) => {
+    presence.docs = snap.docs;
+    cleanupOldPresence(snap.docs);
+    onPresenceChange();
+  }, (err) => log("Anwesenheit", err));
+  presence.refresh = setInterval(onPresenceChange, 10000);
 }
 function stopPresence(room) {
-  stopPresenceHeartbeat();
-  if (room) deleteDoc(doc(db, "rooms", room, "presence", myDeviceId)).catch(() => {});
+  clearInterval(presence.timer); clearInterval(presence.refresh);
+  presence.timer = presence.refresh = null;
+  if (presence.unsub) { try { presence.unsub(); } catch (e) {} presence.unsub = null; }
+  if (room && presence.ref) quiet(deleteDoc(presence.ref));
+  presence.ref = null;
+  presence.docs = [];
 }
-
-// Frische Anwesenheits-Einträge nach Rolle sammeln (mit Namen).
-function countPresence(docs) {
+function cleanupOldPresence(docs) {
   const now = Date.now();
-  const children = [], parents = [], otherParents = [];
   docs.forEach(d => {
-    const data = d.data();
+    const data = d.data({ serverTimestamps: "estimate" }) || {};
     const ts = data.updatedAt && data.updatedAt.toMillis ? data.updatedAt.toMillis() : now;
-    if (now - ts > PRESENCE_FRISCH_MS) return;        // veraltet -> ignorieren
-    const nm = data.name || "Gerät";
-    if (data.role === "send") children.push(nm);
-    else if (data.role === "receive") { parents.push(nm); if (d.id !== myDeviceId) otherParents.push(nm); }
+    if (now - ts > PRESENCE_DELETE_MS) quiet(deleteDoc(d.ref));
   });
-  return {
-    children, parents, otherParents,
-    childrenCount: children.length, parentsCount: parents.length, otherParentsCount: otherParents.length
-  };
 }
 
-// Anwesenheit im laufenden Betrieb anzeigen (mit Namen).
-function updatePresenceUI(c) {
-  if (!currentSession) return;
-  if (currentSession.mode === "send") {
-    const el = $("child-presence");
-    const txt = c.parentsCount > 0 ? escapeHtml(c.parents.join(", ")) : "Noch keine Eltern";
-    el.innerHTML = `<span class="who">${ICON.eye} ${txt}</span>`;
-    el.classList.remove("hidden");
-  } else {
-    const el = $("parent-presence");
-    const childTxt = c.childrenCount > 0 ? escapeHtml(c.children.join(", ")) : "Babybett wartet…";
-    let html = `<span class="who"><span class="on">${ICON.broadcast}</span> ${childTxt}</span>`;
-    if (c.otherParentsCount > 0) html += `<span class="who">${ICON.eye} ${escapeHtml(c.otherParents.join(", "))}</span>`;
-    el.innerHTML = html;
-    el.classList.remove("hidden");
+// Frische Anwesenheits-Einträge nach Rolle sammeln.
+function readPresence(docs) {
+  const now = Date.now();
+  const children = [], parents = [];
+  (docs || []).forEach(d => {
+    const data = d.data({ serverTimestamps: "estimate" }) || {};
+    const ts = data.updatedAt && data.updatedAt.toMillis ? data.updatedAt.toMillis() : now;
+    if (now - ts > PRESENCE_FRESH_MS) return;       // veraltet -> ignorieren
+    const e = { name: data.name || "Gerät", device: data.device || "", session: data.session || "" };
+    if (data.role === "send") children.push(e);
+    else if (data.role === "receive") parents.push(e);
+  });
+  return { children, parents };
+}
+function senderOnline() { return readPresence(presence.docs).children.length > 0; }
+
+async function findOtherSender(room) {
+  const snap = await withTimeout(getDocs(presenceCol(room)), 3000, null);
+  if (!snap) return null;
+  const other = readPresence(snap.docs).children.find(c => c.device !== DEVICE_ID);
+  return other ? other.name : null;
+}
+
+function onPresenceChange() {
+  if (isParent()) {
+    updateParentPresenceUI();
+    updateParentWaiting();
+    syncRemoteControlsUI();
   }
-  renderPresenceList(c);
-}
-
-// Volle Namensliste (im Eltern-Menü).
-function renderPresenceList(c) {
-  const box = $("presence-list");
-  if (!box) return;
-  const rows = [];
-  c.children.forEach(n => rows.push(`<div class="presence-row">${ICON.person}<span class="who-name">${escapeHtml(n)}</span><span class="who-tag child">Babybett</span></div>`));
-  c.parents.forEach(n => rows.push(`<div class="presence-row">${ICON.person}<span class="who-name">${escapeHtml(n)}</span><span class="who-tag parent">Eltern</span></div>`));
-  box.innerHTML = rows.length ? rows.join("") : '<span class="muted">Noch niemand im Raum.</span>';
 }
 
 /* ===========================================================
-   11) KIND-GERÄT (Babybett) – sendet Ton + Video
+   9) WebRTC-Werkzeuge
    =========================================================== */
-let localStream = null;            // Kamera + Mikro des Kind-Geräts
-let childVideoTrack = null;        // die aktuelle Kamera-Spur
-let childPeers = new Map();        // connId -> RTCPeerConnection
-let childUnsub = null;
-let currentDeviceId = null;        // gewählte Kamera (deviceId)
-let currentFacing = "environment";
+// "p" ist ein Objekt mit { pc, pending, remoteSet }. Kandidaten, die vor der
+// Gegenseiten-Beschreibung ankommen, werden gesammelt und später eingespielt.
+function addCandidate(p, cand) {
+  if (!p.pc) return;
+  if (!p.remoteSet) { p.pending.push(cand); return; }
+  p.pc.addIceCandidate(cand).catch(e => log("ICE", e));
+}
+async function flushCandidates(p) {
+  const pc = p.pc;
+  p.remoteSet = true;
+  const list = p.pending; p.pending = [];
+  for (const c of list) { try { await pc.addIceCandidate(c); } catch (e) { log("ICE", e); } }
+}
+function candidateData(c) {
+  const j = c.toJSON ? c.toJSON() : c;
+  return {
+    candidate: j.candidate || "",
+    sdpMid: j.sdpMid === undefined ? null : j.sdpMid,
+    sdpMLineIndex: j.sdpMLineIndex === undefined ? null : j.sdpMLineIndex,
+    usernameFragment: j.usernameFragment === undefined ? null : j.usernameFragment,
+  };
+}
+function closePc(pc) {
+  if (!pc) return;
+  pc.onicecandidate = null; pc.ontrack = null; pc.onconnectionstatechange = null;
+  try { pc.close(); } catch (e) {}
+}
+// Sender für eine Spur-Art (audio/video) finden.
+function senderOf(pc, kind) {
+  if (!pc) return null;
+  const tx = pc.getTransceivers().find(t => !t.stopped && t.receiver && t.receiver.track && t.receiver.track.kind === kind);
+  return tx ? tx.sender : null;
+}
+async function deleteConnDoc(room, id) {
+  const ref = connRef(room, id);
+  try {
+    const batch = writeBatch(db);
+    for (const sub of ["callerCandidates", "calleeCandidates"]) {
+      const snap = await getDocs(collection(ref, sub));
+      snap.forEach(d => batch.delete(d.ref));
+    }
+    batch.delete(ref);
+    await batch.commit();
+  } catch (e) {
+    log("Aufräumen", e);
+    quiet(deleteDoc(ref));
+  }
+}
 
-async function startChild(roomName) {
-  currentSession = { mode: "send", room: roomName };
+/* ===========================================================
+   10) KIND-GERÄT (Babybett) – sendet Ton + Video
+   =========================================================== */
+const child = {
+  stream: null, audio: null, video: null, hasVideo: false,
+  cameraId: "", facing: "environment",
+  cameras: [], camerasKey: "",
+  peers: new Map(),            // connId -> Verbindung zu einem Eltern-Gerät
+  connUnsub: null,
+  queue: Promise.resolve(),    // Kamera/Steuerung nacheinander abarbeiten (nie parallel)
+  applied: { videoOn: null, quality: null },
+  cameraAttempt: null, cameraError: false,
+  stateKey: "",
+  micRetry: null,
+};
+
+function childEnqueue(fn) {
+  child.queue = child.queue.then(() => (isChild() ? fn() : null)).catch(e => log(e));
+  return child.queue;
+}
+function videoSendTrack() { return (control.childVideoEnabled && child.video) ? child.video : null; }
+
+async function startChild(room) {
+  const my = session = { mode: "send", room, id: "s" + randomId(10) };
+  requestWakeLock();
+  roomData = {};
+  Object.assign(child, { cameraAttempt: null, cameraError: false, stateKey: "", camerasKey: "", applied: { videoOn: null, quality: null } });
   showScreen("child");
-  document.querySelectorAll(".room-name-label").forEach(el => el.textContent = "· " + roomName);
+  setRoomLabels(room);
   setStatus("child-status", "Kamera wird gestartet…", "connecting");
 
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: currentFacing, ...QUALITY[control.quality] },
-      audio: { echoCancellation: true, noiseSuppression: true }
-    });
-  } catch (e) {
-    currentSession = null;
-    alert("Kein Zugriff auf Kamera/Mikrofon.\n\nBitte am iPhone erlauben (Einstellungen → Safari → Kamera/Mikrofon)\nund dann erneut auf SENDEN tippen.");
-    showScreen("home");
-    return;
+  // Sendet in diesem Raum schon ein anderes Gerät?
+  const other = await findOtherSender(room);
+  if (session !== my) return;
+  if (other && !confirm(`In diesem Raum sendet schon „${other}“.\n\nSoll dieses Gerät übernehmen? Das andere hört dann auf zu senden.`)) {
+    stopSession(); showScreen("home"); return;
   }
-  childVideoTrack = localStream.getVideoTracks()[0];
-  $("local-video").srcObject = localStream;
-  await requestWakeLock();
-  await fillCameraList();
 
-  // Kontrolle übernehmen / anwenden (Qualität, Video an/aus, …)
-  $("child-quality-select").value = control.quality;
-  listenControl(roomName, applyControlOnChild);
-  startPresence(roomName, "send");
+  // Gespeicherte Fernsteuer-Werte laden (Qualität, Kamera, Video an/aus).
+  const snap = await withTimeout(getDoc(roomRef(room)), 4000, null);
+  if (session !== my) return;
+  const data = (snap && snap.exists()) ? (snap.data() || {}) : {};
+  control = { ...defaultControl(), ...(data.control || {}) };
+  if (!QUALITY[control.quality]) control.quality = "medium";
 
-  setStatus("child-status", "Bereit, warte auf Eltern…", "connecting");
-  await cleanupOldConnections(roomName);
+  const stream = await openChildMedia();
+  if (session !== my) { stopStream(stream); return; }
+  if (!stream) { stopSession(); showScreen("home"); return; }
+  setChildStream(stream);
+  child.applied = { videoOn: control.childVideoEnabled, quality: control.quality };
 
-  const connsRef = collection(db, "rooms", roomName, "connections");
-  childUnsub = onSnapshot(connsRef, (snapshot) => {
-    snapshot.docChanges().forEach((change) => {
-      const data = change.doc.data();
-      if (change.type === "added" && !data.offer && !childPeers.has(change.doc.id)) {
-        createChildPeer(roomName, change.doc.id);
-      }
-      if (change.type === "removed") closeChildPeer(change.doc.id);
-    });
-  });
+  quiet(setDoc(roomRef(room), {
+    name: room, lastActive: serverTimestamp(),
+    sender: { session: my.id, device: DEVICE_ID, name: myName(), since: serverTimestamp() },
+  }, { merge: true }));
+  await refreshCameraList();
+  if (session !== my) return;
+
+  listenRoom(room, onChildRoom);
+  startPresence(room, "send");
+  updateChildUI();
+  publishChildState();
+  if (!("wakeLock" in navigator)) toast("Achtung: Dieses Gerät kann das Display nicht wach halten. Bitte die automatische Sperre ausschalten.", 8000);
+
+  updateChildStatus();
+  child.connUnsub = listenConnections(room);
 }
 
-async function createChildPeer(roomName, connId) {
-  const pc = new RTCPeerConnection(rtcConfig());
-  attachCandidateBuffer(pc);
-  childPeers.set(connId, pc);
-
-  // Zwei Zwei-Wege-Kanäle: Video und Audio (so können auch die Eltern senden,
-  // ohne dass wir die Verbindung neu aushandeln müssen).
-  const videoTx = pc.addTransceiver("video", { direction: "sendrecv", streams: [localStream] });
-  const audioTx = pc.addTransceiver("audio", { direction: "sendrecv", streams: [localStream] });
-  // Eigene Kamera/Mikro senden:
-  try { await videoTx.sender.replaceTrack(control.childVideoEnabled ? childVideoTrack : null); } catch (e) {}
-  try { await audioTx.sender.replaceTrack(localStream.getAudioTracks()[0]); } catch (e) {}
-
-  // Eingehende Eltern-Spuren (Stimme + evtl. Video) anzeigen/abspielen:
-  pc.ontrack = (e) => attachParentTrack(connId, e.track);
-
-  const connRef = doc(db, "rooms", roomName, "connections", connId);
-  const callerCandidates = collection(connRef, "callerCandidates");
-  pc.onicecandidate = (e) => { if (e.candidate) addDoc(callerCandidates, e.candidate.toJSON()); };
-  pc.onconnectionstatechange = () => {
-    updateChildStatus();
-    if (pc.connectionState === "failed" || pc.connectionState === "closed") closeChildPeer(connId);
-  };
-
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  await updateDoc(connRef, { offer: { type: offer.type, sdp: offer.sdp } });
-
-  pc._unsubAnswer = onSnapshot(connRef, async (snap) => {
-    const data = snap.data();
-    if (data && data.answer && !pc.currentRemoteDescription) {
-      await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-      await flushCandidates(pc);
+async function openChildMedia() {
+  const q = QUALITY[control.quality] || QUALITY.medium;
+  const size = { width: { ideal: q.width }, height: { ideal: q.height }, frameRate: { ideal: q.frameRate } };
+  const tries = [];
+  if (control.cameraId) tries.push({ audio: AUDIO_CONSTRAINTS, video: { deviceId: { exact: control.cameraId }, ...size } });
+  tries.push({ audio: AUDIO_CONSTRAINTS, video: { facingMode: { ideal: child.facing }, ...size } });
+  tries.push({ audio: AUDIO_CONSTRAINTS, video: true });
+  let lastErr = null, denied = false;
+  for (const c of tries) {
+    try { return await getMedia(c); }
+    catch (e) {
+      lastErr = e; log("Kamera/Mikro", e);
+      if (e.name === "NotAllowedError" || e.name === "SecurityError" || e.name === "NotSupportedError") { denied = e.name !== "NotSupportedError"; break; }
     }
-  });
-  pc._unsubCand = onSnapshot(collection(connRef, "calleeCandidates"), (snap) => {
-    snap.docChanges().forEach((c) => { if (c.type === "added") addRemoteCandidate(pc, c.doc.data()); });
-  });
+  }
+  // Ohne Kamera wenigstens den Ton senden (das Wichtigste beim Babyphone).
+  if (!lastErr || lastErr.name !== "NotSupportedError") {
+    try {
+      const s = await getMedia({ audio: AUDIO_CONSTRAINTS });
+      toast("Kamera nicht verfügbar – es wird nur Ton gesendet.", 6000);
+      return s;
+    } catch (e) { lastErr = e; if (e.name === "NotAllowedError") denied = true; }
+  }
+  alert(denied
+    ? "Kein Zugriff auf Kamera/Mikrofon.\n\nBitte erlauben (iPhone: Einstellungen → Safari → Kamera bzw. Mikrofon → Erlauben) und dann erneut SENDEN tippen."
+    : "Kamera/Mikrofon konnte nicht gestartet werden.\n(" + ((lastErr && (lastErr.message || lastErr.name)) || "Fehler") + ")");
+  return null;
 }
 
-function closeChildPeer(connId) {
-  const pc = childPeers.get(connId);
-  if (!pc) return;
-  try { pc._unsubAnswer && pc._unsubAnswer(); } catch (e) {}
-  try { pc._unsubCand && pc._unsubCand(); } catch (e) {}
-  try { pc.close(); } catch (e) {}
-  childPeers.delete(connId);
-  removeParentTile(connId);
+function setChildStream(stream) {
+  child.stream = stream;
+  child.audio = stream.getAudioTracks()[0] || null;
+  child.video = stream.getVideoTracks()[0] || null;
+  child.hasVideo = !!child.video;
+  child.cameraId = "";
+  if (child.video) {
+    const s = child.video.getSettings();
+    child.cameraId = s.deviceId || "";
+    if (s.facingMode) child.facing = s.facingMode;
+  }
+  watchChildTrack(child.audio);
+  watchChildTrack(child.video);
+  showLocalPreview();
+}
+function showLocalPreview() {
+  const v = $("local-video");
+  v.srcObject = null;
+  v.srcObject = child.stream;
+  v.play().catch(() => {});
+}
+// Endet eine Spur unerwartet (z.B. Anruf, iPhone im Hintergrund), wird sie neu gestartet.
+function watchChildTrack(track) {
+  if (!track) return;
+  track.onended = () => {
+    if (isChild() && (track === child.audio || track === child.video)) childEnqueue(recoverChildMedia);
+  };
+}
+
+// Eine Spur austauschen – lokal und in allen laufenden Verbindungen (ohne Neuverhandlung).
+async function swapChildTrack(kind, track) {
+  const old = kind === "audio" ? child.audio : child.video;
+  if (old && old !== track) {
+    old.onended = null;
+    try { child.stream.removeTrack(old); } catch (e) {}
+    try { old.stop(); } catch (e) {}
+  }
+  if (track) { child.stream.addTrack(track); watchChildTrack(track); }
+  if (kind === "audio") child.audio = track;
+  else { child.video = track; child.hasVideo = !!track; }
+  for (const p of child.peers.values()) {
+    const s = senderOf(p.pc, kind);
+    if (s) await quiet(s.replaceTrack(kind === "video" ? videoSendTrack() : track));
+  }
+  if (kind === "video") showLocalPreview();
+}
+
+async function recoverChildMedia() {
+  if (!isChild() || !child.stream) return;
+  if (!child.audio || child.audio.readyState === "ended") {
+    try {
+      const s = await getMedia({ audio: AUDIO_CONSTRAINTS });
+      if (!isChild()) { stopStream(s); return; }
+      await swapChildTrack("audio", s.getAudioTracks()[0]);
+      toast("Mikrofon läuft wieder.");
+    } catch (e) {
+      log("Mikro neu starten", e);
+      setStatus("child-status", "Mikrofon unterbrochen!", "warning");
+      // Im Vordergrund nach kurzer Zeit erneut versuchen (z.B. nach einem Anruf).
+      clearTimeout(child.micRetry);
+      child.micRetry = setTimeout(() => {
+        if (isChild() && document.visibilityState === "visible") childEnqueue(recoverChildMedia);
+      }, 10000);
+      return;
+    }
+  }
+  if (child.video && child.video.readyState === "ended") {
+    await switchCamera(child.cameraId ? { deviceId: child.cameraId } : { facing: child.facing }, false);
+  }
   updateChildStatus();
 }
 
-function updateChildStatus() {
-  let connected = 0;
-  childPeers.forEach(pc => { if (pc.connectionState === "connected") connected++; });
-  if (connected > 0) setStatus("child-status", connected === 1 ? "Verbunden (1 Empfänger)" : `Verbunden (${connected} Empfänger)`, "connected");
-  else setStatus("child-status", "Bereit, warte auf Eltern…", "connecting");
-}
+// Kamera wechseln. target = { deviceId } oder { facing: "user"|"environment" }.
+// local = true, wenn am Kind-Gerät selbst gewählt (dann auch in die Fernsteuerung schreiben).
+async function switchCamera(target, local) {
+  if (!isChild() || !child.stream) return false;
+  const q = QUALITY[control.quality] || QUALITY.medium;
+  const size = { width: { ideal: q.width }, height: { ideal: q.height }, frameRate: { ideal: q.frameRate } };
+  const prevId = child.cameraId, prevFacing = child.facing;
 
-/* ===== Eltern-Medien auf dem Kind-Gerät: große Bühne + Splitscreen =====
-   Wichtig: wir hängen die EINZELNE Spur (e.track) an einen eigenen Stream pro
-   Verbindung. So funktioniert es zuverlässig, auch wenn die Eltern Video erst
-   später dazuschalten (replaceTrack ohne Neuverhandlung). */
-const parentTiles = new Map();   // connId -> { stream, el }   (nur Video)
-let childAudioStream = null;     // alle Eltern-Stimmen in einem Stream (zuverlässige Wiedergabe)
+  // Alte Kamera zuerst freigeben – viele Android-Handys können nur eine Kamera gleichzeitig öffnen.
+  if (child.video) {
+    const old = child.video;
+    old.onended = null;
+    try { child.stream.removeTrack(old); } catch (e) {}
+    try { old.stop(); } catch (e) {}
+    child.video = null;
+  }
 
-function attachParentTrack(connId, track) {
-  if (track.kind === "audio") {
-    // Stimme: in EIN Audio-Element. So spielt der Ton zuverlässig (auch wenn kein Video an ist).
-    if (!childAudioStream) { childAudioStream = new MediaStream(); $("parent-audio").srcObject = childAudioStream; }
-    if (!childAudioStream.getTracks().some(t => t.id === track.id)) childAudioStream.addTrack(track);
-    $("parent-audio").volume = control.childVolume / 100;
-    playChildAudio();
+  const tries = [];
+  if (target.deviceId) tries.push({ deviceId: { exact: target.deviceId }, ...size });
+  if (target.facing) tries.push({ facingMode: { exact: target.facing }, ...size });
+  if (prevId) tries.push({ deviceId: { exact: prevId }, ...size });   // zurück zur alten
+  tries.push({ facingMode: { ideal: prevFacing }, ...size });
+  tries.push(true);
+
+  let track = null;
+  for (const c of tries) {
+    try {
+      const s = await getMedia({ video: c });
+      track = s.getVideoTracks()[0] || null;
+      if (track) break;
+    } catch (e) { log("Kamera", e); }
+  }
+  if (!isChild()) { if (track) track.stop(); return false; }
+
+  await swapChildTrack("video", track);
+  let ok = false;
+  if (track) {
+    const s = track.getSettings();
+    child.cameraId = s.deviceId || "";
+    if (s.facingMode) child.facing = s.facingMode;
+    ok = target.deviceId ? child.cameraId === target.deviceId
+       : (s.facingMode ? s.facingMode === target.facing : child.cameraId !== prevId);
   } else {
-    // Video: eigene Kachel pro Verbindung (stumm – der Ton läuft über parent-audio).
-    let entry = parentTiles.get(connId);
-    if (!entry) {
-      const stream = new MediaStream();
-      const el = document.createElement("video");
-      el.className = "parent-tile empty";
-      el.autoplay = true; el.playsInline = true; el.muted = true; el.dataset.conn = connId;
-      el.srcObject = stream;
-      $("parent-stage").appendChild(el);
-      entry = { stream, el };
-      parentTiles.set(connId, entry);
-    }
-    if (!entry.stream.getTracks().some(t => t.id === track.id)) entry.stream.addTrack(track);
-    entry.el.play().catch(() => {});
+    child.cameraId = "";
   }
-  // Bei Änderung (Video an/aus, Sprechen) Bühne neu rechnen.
-  track.onunmute = updateParentStage;
-  track.onmute = updateParentStage;
-  track.onended = updateParentStage;
-  updateParentStage();
-}
-function removeParentTile(connId) {
-  const entry = parentTiles.get(connId);
-  if (entry) { try { entry.el.remove(); } catch (e) {} parentTiles.delete(connId); }
-  updateParentStage();
-}
-// Eltern-Ton abspielen; klappt der Autostart nicht, Hinweis zum Antippen zeigen.
-function playChildAudio() {
-  const a = $("parent-audio");
-  a.muted = false;
-  a.volume = control.childVolume / 100;
-  a.play().then(() => $("child-unmute").classList.add("hidden"))
-          .catch(() => $("child-unmute").classList.remove("hidden"));
-}
-function tileHasLiveVideo(entry) {
-  return entry.stream.getVideoTracks().some(t => t.readyState === "live" && !t.muted);
-}
-function anyParentTalking() {
-  if (!childAudioStream) return false;
-  return childAudioStream.getAudioTracks().some(t => t.readyState === "live" && !t.muted);
-}
-// Bühne zeichnen: jede Verbindung mit aktivem Eltern-Video bekommt eine Kachel (Splitscreen).
-function updateParentStage() {
-  const stage = $("parent-stage");
-  let active = 0;
-  parentTiles.forEach(entry => {
-    const show = control.showParentVideoOnChild && tileHasLiveVideo(entry);
-    entry.el.classList.toggle("empty", !show);
-    if (show) active++;
-  });
-  stage.className = "parent-stage" + (active ? " tiles-" + Math.min(active, 4) : "");
-  if (active === 0) stage.classList.add("hidden");
-  if (childAudioStream) $("parent-audio").volume = control.childVolume / 100;
-  $("parent-talking").classList.toggle("hidden", !anyParentTalking());
+  child.cameraError = !ok;
+  await refreshCameraList();
+  if (local && child.cameraId) { child.cameraAttempt = null; setControl({ cameraId: child.cameraId }); }
+  updateChildUI();
+  publishChildState();
+  if (!track) toast("Kamera konnte nicht gestartet werden – es wird nur Ton gesendet.", 5000);
+  else if (!ok) toast(target.facing ? "Keine andere Kamera gefunden." : "Diese Kamera ließ sich nicht öffnen.");
+  return ok;
 }
 
-// Tippen auf den Hinweis schaltet den Ton frei.
-$("child-unmute").addEventListener("click", () => {
-  unlockMedia();
-  const a = $("parent-audio"); a.muted = false;
-  a.play().catch(() => {});
-  $("child-unmute").classList.add("hidden");
+/* Kamera-Liste (auch alle iPhone-Kameras) füllen + an die Eltern melden */
+async function refreshCameraList() {
+  let devs = [];
+  try { devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "videoinput"); }
+  catch (e) { log(e); }
+  child.cameras = devs.filter(d => d.deviceId).map((d, i) => ({ id: d.deviceId, label: d.label || `Kamera ${i + 1}` }));
+  const sel = $("child-camera-select");
+  sel.innerHTML = "";
+  if (!child.cameras.length) sel.appendChild(new Option("Keine Kamera gefunden", ""));
+  child.cameras.forEach(c => sel.appendChild(new Option(c.label, c.id)));
+  sel.value = child.cameraId || "";
+  const key = JSON.stringify(child.cameras);
+  if (isChild() && key !== child.camerasKey) {
+    child.camerasKey = key;
+    quiet(setDoc(roomRef(session.room), { cameras: child.cameras }, { merge: true }));
+  }
+}
+
+$("child-camera-select").addEventListener("change", (e) => {
+  const id = e.target.value;
+  if (isChild() && id && id !== child.cameraId) childEnqueue(() => switchCamera({ deviceId: id }, true));
 });
-
-/* Fernsteuerung auf dem Kind-Gerät anwenden */
-async function applyControlOnChild() {
-  if (!currentSession || currentSession.mode !== "send") return;
-  // Kamera per Fernsteuerung wechseln (falls die Eltern eine andere wählen):
-  if (control.cameraId && childVideoTrack && childVideoTrack.getSettings().deviceId !== control.cameraId) {
-    await switchCamera({ deviceId: control.cameraId }, false);
-  }
-  // Video an/aus:
-  for (const pc of childPeers.values()) {
-    const s = senderForKind(pc, "video");
-    if (s) { try { await s.replaceTrack(control.childVideoEnabled ? childVideoTrack : null); } catch (e) {} }
-  }
-  // Qualität:
-  if (childVideoTrack) { try { await childVideoTrack.applyConstraints(QUALITY[control.quality]); } catch (e) {} }
-  $("child-quality-select").value = control.quality;
-  // Eltern-Bühne (Lautstärke + Sichtbarkeit) aktualisieren:
-  updateParentStage();
-  // Knopf-Status "Video"
-  $("child-video-toggle").classList.toggle("active", control.childVideoEnabled);
-}
-
-/* Kamera-Liste (auch alle iPhone-Kameras) füllen */
-async function fillCameraList() {
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const cams = devices.filter(d => d.kind === "videoinput");
-    const sel = $("child-camera-select");
-    sel.innerHTML = "";
-    cams.forEach((cam, i) => {
-      const o = document.createElement("option");
-      o.value = cam.deviceId;
-      o.textContent = cam.label || `Kamera ${i + 1}`;
-      sel.appendChild(o);
-    });
-    if (childVideoTrack) {
-      const id = childVideoTrack.getSettings().deviceId;
-      if (id) { sel.value = id; currentDeviceId = id; }
-    }
-    // Kameraliste in den Raum schreiben, damit die Eltern sie fernsteuern können.
-    if (currentSession && currentSession.mode === "send") {
-      const list = cams.map((c, i) => ({ id: c.deviceId, label: c.label || `Kamera ${i + 1}` }));
-      setDoc(doc(db, "rooms", currentSession.room), { cameras: list }, { merge: true }).catch(() => {});
-    }
-  } catch (e) {}
-}
-
-// Kamera per Auswahl (Dropdown) wechseln
-$("child-camera-select").addEventListener("change", (e) => switchCamera({ deviceId: e.target.value }));
-// Schnell-Umschalter Front/Rück
 $("child-cam-btn").addEventListener("click", () => {
-  currentFacing = currentFacing === "environment" ? "user" : "environment";
-  switchCamera({ facingMode: currentFacing });
+  if (!isChild()) return;
+  childEnqueue(() => switchCamera({ facing: child.facing === "user" ? "environment" : "user" }, true));
+});
+$("child-video-toggle").addEventListener("click", () => {
+  if (!isChild()) return;
+  if (!child.hasVideo) { toast("Keine Kamera aktiv – es wird nur Ton gesendet."); return; }
+  setControl({ childVideoEnabled: !control.childVideoEnabled });
+  childEnqueue(applyControlOnChild);
+});
+$("child-quality-select").addEventListener("change", (e) => {
+  if (!isChild()) return;
+  setControl({ quality: e.target.value });
+  childEnqueue(applyControlOnChild);
 });
 
-async function switchCamera(videoConstraint, publish = true) {
-  if (!localStream) return;
-  try {
-    const newStream = await navigator.mediaDevices.getUserMedia({
-      video: { ...videoConstraint, ...QUALITY[control.quality] }, audio: false
-    });
-    const newTrack = newStream.getVideoTracks()[0];
-    for (const pc of childPeers.values()) {
-      const s = senderForKind(pc, "video");
-      if (s && control.childVideoEnabled) { try { await s.replaceTrack(newTrack); } catch (e) {} }
-    }
-    const oldTrack = localStream.getVideoTracks()[0];
-    if (oldTrack) { localStream.removeTrack(oldTrack); oldTrack.stop(); }
-    localStream.addTrack(newTrack);
-    childVideoTrack = newTrack;
-    $("local-video").srcObject = localStream;
-    await fillCameraList();
-    // gewählte Kamera in die Fernsteuerung schreiben (damit Eltern es sehen)
-    if (publish) {
-      const id = childVideoTrack.getSettings().deviceId;
-      if (id) setControl({ cameraId: id });
-    }
-  } catch (e) { alert("Kamera konnte nicht gewechselt werden."); }
-}
-
-// Kind: Video lokal an/aus (schreibt auch in die Fernsteuerung)
-$("child-video-toggle").addEventListener("click", () => setControl({ childVideoEnabled: !control.childVideoEnabled }));
-// Qualität lokal wählen
-$("child-quality-select").addEventListener("change", (e) => setControl({ quality: e.target.value }));
-
-// Bildschirm aus
+// Display aus (schwarzer Vorhang, alles läuft weiter)
 $("screen-off-btn").addEventListener("click", () => $("screen-off-curtain").classList.remove("hidden"));
 $("screen-off-curtain").addEventListener("click", () => $("screen-off-curtain").classList.add("hidden"));
 
-/* ===========================================================
-   12) ELTERN-GERÄT – empfängt; kann sprechen + eigenes Video
-   =========================================================== */
-let parentPc = null;
-let parentConnId = null;
-let parentUnsubs = [];
-let reconnectTimer = null;
-let reconnecting = false;
-let parentMicStream = null;      // Mikro der Eltern (für Sprechen)
-let parentCamStream = null;      // Kamera der Eltern (für eigenes Video)
-let talkOn = false;
-let parentVideoOn = false;
-
-async function startParent(roomName) {
-  currentSession = { mode: "receive", room: roomName };
-  showScreen("parent");
-  document.querySelectorAll(".room-name-label").forEach(el => el.textContent = "· " + roomName);
-  $("parent-placeholder").classList.remove("hidden");
-  await requestWakeLock();
-
-  // Fernsteuer-Bedienelemente mit aktuellen Werten füllen + Änderungen hören
-  listenControl(roomName, syncRemoteControlsUI);
-  startPresence(roomName, "receive");
-  remoteRotation = 0; applyRotation();
-  $("rc-bg-audio").checked = bgAudio;
-
-  connectParent(roomName);
+function onChildRoom(snap) {
+  if (!isChild()) return;
+  if (!snap.exists()) {
+    // Raum-Dokument fehlt (z.B. in der Konsole gelöscht) -> wieder eintragen.
+    child.camerasKey = ""; child.stateKey = "";
+    quiet(setDoc(roomRef(session.room), {
+      name: session.room, lastActive: serverTimestamp(), cameras: child.cameras,
+      sender: { session: session.id, device: DEVICE_ID, name: myName(), since: serverTimestamp() },
+    }, { merge: true }));
+    return;
+  }
+  const snd = roomData.sender;
+  if (snd && snd.session && snd.session !== session.id) {
+    // Ein anderes Gerät hat das Senden übernommen.
+    const who = snd.name || "ein anderes Gerät";
+    stopSession();
+    showScreen("home");
+    alert(`In diesem Raum sendet jetzt „${who}“.\nDieses Gerät hat das Senden beendet.`);
+    return;
+  }
+  childEnqueue(applyControlOnChild);
+}
+function isCurrentSender() {
+  const snd = roomData.sender;
+  return !snd || !snd.session || snd.session === session.id;
 }
 
-async function connectParent(roomName) {
-  setStatus("parent-status", "Verbinde…", "connecting");
-  const pc = new RTCPeerConnection(rtcConfig());
-  attachCandidateBuffer(pc);
-  parentPc = pc;
-
-  pc.ontrack = (e) => {
-    $("remote-video").srcObject = e.streams[0];
-    $("parent-placeholder").classList.add("hidden");
-    tryPlayRemote();
-  };
-  pc.onconnectionstatechange = () => {
-    const st = pc.connectionState;
-    if (st === "connected") {
-      setStatus("parent-status", "Verbunden", "connected");
-      $("parent-placeholder").classList.add("hidden");
-      reconnecting = false;
-      // Falls Sprechen/Video schon aktiv waren: Spuren wieder einhängen.
-      reattachParentTracks();
-    } else if (st === "disconnected" || st === "failed") {
-      setStatus("parent-status", "Getrennt, versuche erneut…", "disconnected");
-      scheduleReconnect(roomName);
+/* Fernsteuerung auf dem Kind-Gerät anwenden – nur was sich wirklich geändert hat. */
+async function applyControlOnChild() {
+  if (!isChild() || !child.stream) return;
+  // 1) Kamera (von den Eltern gewählt). Jede Wahl wird nur EINMAL versucht -> keine Endlosschleife.
+  const want = control.cameraId;
+  if (want && want !== child.cameraId && want !== child.cameraAttempt && child.cameras.some(c => c.id === want)) {
+    child.cameraAttempt = want;
+    await switchCamera({ deviceId: want }, false);
+    if (!isChild()) return;
+  }
+  // 2) Video an/aus
+  if (child.applied.videoOn !== control.childVideoEnabled) {
+    child.applied.videoOn = control.childVideoEnabled;
+    const t = videoSendTrack();
+    for (const p of child.peers.values()) {
+      const s = senderOf(p.pc, "video");
+      if (s) await quiet(s.replaceTrack(t));
     }
+  }
+  // 3) Qualität (Kamera-Auflösung + maximale Datenrate)
+  if (child.applied.quality !== control.quality) {
+    child.applied.quality = control.quality;
+    const q = QUALITY[control.quality];
+    if (child.video) await quiet(child.video.applyConstraints({ width: { ideal: q.width }, height: { ideal: q.height }, frameRate: { ideal: q.frameRate } }));
+    for (const p of child.peers.values()) await applySenderQuality(p.pc);
+  }
+  updateChildUI();
+  updateParentStage();
+  publishChildState();
+}
+
+async function applySenderQuality(pc) {
+  const q = QUALITY[control.quality] || QUALITY.medium;
+  const s = senderOf(pc, "video");
+  if (!s || !s.getParameters || !s.setParameters) return;
+  try {
+    const params = s.getParameters();
+    if (!params.encodings || !params.encodings.length) return;
+    params.encodings.forEach(e => { e.maxBitrate = q.maxBitrate; });
+    await s.setParameters(params);
+  } catch (e) { log("Datenrate", e); }
+}
+
+// Dem Eltern-Gerät melden, was das Kind-Gerät gerade WIRKLICH tut.
+function publishChildState() {
+  if (!isChild()) return;
+  const st = {
+    session: session.id,
+    cameraId: child.cameraId || "",
+    cameraError: !!child.cameraError,
+    hasVideo: !!child.hasVideo,
+    videoOn: !!(child.hasVideo && control.childVideoEnabled),
+    quality: control.quality,
+    canSetVolume: CAN_SET_VOLUME,
   };
-
-  const connsRef = collection(db, "rooms", roomName, "connections");
-  let connRef;
-  try { connRef = await addDoc(connsRef, { role: "parent", createdAt: serverTimestamp() }); }
-  catch (e) { setStatus("parent-status", "Getrennt, versuche erneut…", "disconnected"); scheduleReconnect(roomName); return; }
-  parentConnId = connRef.id;
-
-  const calleeCandidates = collection(connRef, "calleeCandidates");
-  pc.onicecandidate = (e) => { if (e.candidate) addDoc(calleeCandidates, e.candidate.toJSON()); };
-
-  parentUnsubs.push(onSnapshot(connRef, async (snap) => {
-    const data = snap.data();
-    if (data && data.offer && !pc.currentRemoteDescription) {
-      await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
-      // Beide Kanäle auf "senden+empfangen" stellen, damit wir auch senden dürfen.
-      pc.getTransceivers().forEach(t => { try { t.direction = "sendrecv"; } catch (e) {} });
-      await flushCandidates(pc);
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-      await updateDoc(connRef, { answer: { type: answer.type, sdp: answer.sdp } });
-    }
-  }));
-  parentUnsubs.push(onSnapshot(collection(connRef, "callerCandidates"), (snap) => {
-    snap.docChanges().forEach((c) => { if (c.type === "added") addRemoteCandidate(pc, c.doc.data()); });
-  }));
+  const key = JSON.stringify(st);
+  if (key === child.stateKey) return;
+  child.stateKey = key;
+  quiet(setDoc(roomRef(session.room), { childState: { ...st, updatedAt: serverTimestamp() } }, { merge: true }));
 }
 
-function scheduleReconnect(roomName) {
-  if (reconnecting || !currentSession || currentSession.mode !== "receive") return;
-  reconnecting = true;
-  clearTimeout(reconnectTimer);
-  reconnectTimer = setTimeout(async () => {
-    await teardownParentConnection(roomName);
-    if (currentSession && currentSession.mode === "receive") connectParent(roomName);
-  }, 2500);
-}
-async function teardownParentConnection(roomName) {
-  parentUnsubs.forEach(u => { try { u(); } catch (e) {} });
-  parentUnsubs = [];
-  if (parentConnId) { const id = parentConnId; parentConnId = null; deleteConnectionDoc(roomName, id); }
-  if (parentPc) { try { parentPc.close(); } catch (e) {} parentPc = null; }
+function updateChildUI() {
+  if (!isChild()) return;
+  const on = control.childVideoEnabled && child.hasVideo;
+  const btn = $("child-video-toggle");
+  btn.classList.toggle("active", on);
+  btn.querySelector(".lbl").textContent = on ? "Video an" : "Video aus";
+  $("child-quality-select").value = control.quality;
+  const sel = $("child-camera-select");
+  if (child.cameraId && document.activeElement !== sel) sel.value = child.cameraId;
+  const info = !child.hasVideo ? "Keine Kamera – nur Ton" : (!control.childVideoEnabled ? "Video aus – Eltern hören nur Ton" : "");
+  $("child-info").textContent = info;
+  $("child-info").classList.toggle("hidden", !info);
 }
 
-/* ----- Ton automatisch starten (Browser blockieren das manchmal) ----- */
-async function tryPlayRemote() {
-  const v = $("remote-video");
-  try { await v.play(); $("unmute-overlay").classList.add("hidden"); }
-  catch (e) {
-    v.muted = true; try { await v.play(); } catch (e2) {}
-    $("unmute-overlay").classList.remove("hidden");
+function updateChildStatus() {
+  if (!isChild()) return;
+  if (!child.audio || child.audio.readyState === "ended") { setStatus("child-status", "Mikrofon unterbrochen!", "warning"); return; }
+  const peers = [...child.peers.values()];
+  const conn = peers.filter(p => p.pc.connectionState === "connected");
+  if (conn.length) {
+    const names = [...new Set(conn.map(p => p.name))].join(", ");
+    setStatus("child-status", "Verbunden mit " + names, "connected");
+  } else if (peers.length) {
+    setStatus("child-status", "Eltern verbinden sich…", "connecting");
+  } else {
+    setStatus("child-status", "Bereit – warte auf Eltern…", "connecting");
   }
 }
-$("unmute-overlay").addEventListener("click", () => {
-  const v = $("remote-video");
-  v.muted = false; v.volume = $("volume-slider").value / 100;
-  $("unmute-overlay").classList.add("hidden");
-  v.play().catch(() => {});
-});
-$("volume-slider").addEventListener("input", (e) => {
-  const v = $("remote-video");
-  v.volume = e.target.value / 100;
-  if (e.target.value > 0) v.muted = false;
+
+/* ----- Verbindungen zu den Eltern ----- */
+function listenConnections(room) {
+  return onSnapshot(connsCol(room), (snap) => {
+    if (!isChild() || session.room !== room) return;
+    snap.docChanges().forEach(handleConnChange);
+  }, (err) => {
+    log("Verbindungen", err);
+    setTimeout(() => {
+      if (isChild() && session.room === room) child.connUnsub = listenConnections(room);
+    }, 3000);
+  });
+}
+
+function handleConnChange(ch) {
+  const id = ch.doc.id;
+  if (ch.type === "removed") { closeChildPeer(id, null); return; }
+  const data = ch.doc.data() || {};
+  const p = child.peers.get(id);
+  if (p) { onPeerDoc(p, data); return; }
+  if (data.role !== "parent") return;
+  if (!data.offer) {
+    if (isCurrentSender()) createChildPeer(id, data);
+    return;
+  }
+  // Angebot vorhanden, aber nicht von dieser Sitzung -> veraltet (z.B. nach Neustart).
+  // Löschen: Die Eltern merken das sofort und bauen neu auf.
+  quiet(deleteConnDoc(session.room, id));
+}
+
+async function createChildPeer(id, data) {
+  if (!child.stream) return;
+  const room = session.room;
+  const ref = connRef(room, id);
+  const pc = new RTCPeerConnection(rtcConfig());
+  const p = {
+    id, ref, pc, pending: [], remoteSet: false, offered: false, answered: false, closed: false,
+    name: data.name || "Eltern", talk: !!data.talk, video: !!data.video,
+    audioEl: null, tile: null, blocked: false, timer: null, unsubs: [],
+  };
+  child.peers.set(id, p);
+
+  try {
+    // Zwei Zwei-Wege-Kanäle: Video und Audio. So können die Eltern später
+    // sprechen/Video zeigen, ohne dass neu verhandelt werden muss.
+    pc.addTransceiver(videoSendTrack() || "video", { direction: "sendrecv", streams: [child.stream] });
+    pc.addTransceiver(child.audio || "audio", { direction: "sendrecv", streams: [child.stream] });
+
+    pc.ontrack = (e) => attachParentTrack(p, e.track);
+    pc.onicecandidate = (e) => {
+      if (e.candidate && !p.closed) quiet(setDoc(doc(collection(ref, "callerCandidates")), candidateData(e.candidate)));
+    };
+    pc.onconnectionstatechange = () => {
+      if (p.closed) return;
+      const st = pc.connectionState;
+      if (st === "connected") { clearTimeout(p.timer); p.timer = null; applySenderQuality(pc); }
+      if (st === "failed") { closeChildPeer(id, room); return; }
+      // Abgerissen (z.B. Eltern-Handy neu geladen): nach kurzer Zeit aufräumen.
+      // Lebt das Eltern-Gerät noch, baut es von sich aus eine neue Verbindung auf.
+      if (st === "disconnected") {
+        clearTimeout(p.timer);
+        p.timer = setTimeout(() => {
+          if (!p.closed && pc.connectionState !== "connected") closeChildPeer(id, room);
+        }, CHILD_DISCONNECT_CLEANUP_MS);
+      }
+      updateChildStatus();
+    };
+    p.unsubs.push(onSnapshot(collection(ref, "calleeCandidates"), (snap) => {
+      snap.docChanges().forEach(c => { if (c.type === "added") addCandidate(p, c.doc.data()); });
+    }, (err) => log("ICE", err)));
+    // Kommt keine Verbindung zustande: aufräumen. Die Eltern versuchen es dann neu.
+    p.timer = setTimeout(() => {
+      if (!p.closed && pc.connectionState !== "connected") closeChildPeer(id, room);
+    }, CHILD_PEER_TIMEOUT_MS);
+
+    const offer = await pc.createOffer();
+    if (p.closed) return;
+    await pc.setLocalDescription(offer);
+    if (p.closed) return;
+    p.offered = true;
+    // updateDoc (statt setDoc): schlägt fehl, wenn die Eltern das Dokument schon gelöscht haben.
+    await updateDoc(ref, { offer: { type: offer.type, sdp: offer.sdp }, offerSession: session.id, senderName: myName() });
+  } catch (e) {
+    log("Angebot", e);
+    // Dokument löschen -> die Eltern merken es sofort und versuchen es neu.
+    closeChildPeer(id, room);
+  }
+  updateChildStatus();
+}
+
+function onPeerDoc(p, data) {
+  if (data.answer && p.offered && !p.answered) {
+    p.answered = true;
+    p.pc.setRemoteDescription(data.answer)
+      .then(() => flushCandidates(p))
+      .catch(e => { log("Antwort", e); if (session) closeChildPeer(p.id, session.room); });
+  }
+  const talk = !!data.talk, video = !!data.video, name = data.name || "Eltern";
+  if (talk !== p.talk || video !== p.video || name !== p.name) {
+    const videoStarted = video && !p.video;
+    p.talk = talk; p.video = video; p.name = name;
+    // Eltern schalten ihr Video an -> Vorhang weg, damit das Kind es sieht.
+    if (videoStarted && control.showParentVideoOnChild) $("screen-off-curtain").classList.add("hidden");
+    if (talk) playParentAudio(p);
+    updateParentStage();
+    updateChildStatus();
+  }
+}
+
+function closeChildPeer(id, deleteFromRoom) {
+  const p = child.peers.get(id);
+  if (!p) return;
+  p.closed = true;
+  child.peers.delete(id);
+  clearTimeout(p.timer);
+  p.unsubs.forEach(u => { try { u(); } catch (e) {} });
+  closePc(p.pc);
+  if (p.audioEl) { p.audioEl.srcObject = null; p.audioEl.remove(); }
+  if (p.tile) { p.tile.srcObject = null; p.tile.remove(); }
+  if (deleteFromRoom) quiet(deleteConnDoc(deleteFromRoom, id));
+  updateParentStage();
+  updateChildStatus();
+}
+
+/* ===== Eltern-Medien auf dem Kind-Gerät =====
+   Pro Eltern-Gerät ein eigenes Audio-Element (mehrere Stimmen in EINEM
+   Element spielen manche Browser nicht ab) und eine eigene Video-Kachel. */
+function attachParentTrack(p, track) {
+  if (p.closed) return;
+  if (track.kind === "audio") {
+    if (!p.audioEl) {
+      const a = document.createElement("audio");
+      a.autoplay = true;
+      a.setAttribute("playsinline", "");
+      $("parent-audios").appendChild(a);
+      p.audioEl = a;
+    }
+    p.audioEl.srcObject = new MediaStream([track]);
+    playParentAudio(p);
+  } else {
+    if (!p.tile) {
+      const v = document.createElement("video");
+      v.className = "parent-tile empty";
+      v.autoplay = true; v.muted = true; v.playsInline = true;
+      v.setAttribute("playsinline", "");
+      $("parent-stage").appendChild(v);
+      p.tile = v;
+    }
+    p.tile.srcObject = new MediaStream([track]);
+    p.tile.play().catch(() => {});
+  }
+  updateParentStage();
+}
+function playParentAudio(p) {
+  const a = p.audioEl;
+  if (!a || !a.srcObject) return;
+  a.muted = false;
+  if (CAN_SET_VOLUME) a.volume = Math.min(1, Math.max(0, control.childVolume / 100));
+  const pr = a.play();
+  if (pr && pr.then) {
+    pr.then(() => { p.blocked = false; updateParentStage(); })
+      .catch(e => { if (e && e.name === "NotAllowedError") { p.blocked = true; updateParentStage(); } });
+  }
+}
+// Bühne zeichnen: jedes Eltern-Gerät mit aktivem Video bekommt eine Kachel (Splitscreen).
+function updateParentStage() {
+  if (!isChild()) return;
+  const stage = $("parent-stage");
+  let shown = 0;
+  const talkers = [];
+  let blocked = false;
+  child.peers.forEach(p => {
+    const vis = !!(control.showParentVideoOnChild && p.video && p.tile);
+    if (p.tile) p.tile.classList.toggle("empty", !vis);
+    if (vis) shown++;
+    if (p.audioEl && CAN_SET_VOLUME) p.audioEl.volume = Math.min(1, Math.max(0, control.childVolume / 100));
+    if (p.talk) { talkers.push(p.name); if (p.blocked) blocked = true; }
+  });
+  stage.className = "parent-stage" + (shown ? " tiles-" + Math.min(shown, 4) : " hidden");
+  const names = [...new Set(talkers)];
+  $("parent-talking-text").textContent = names.length ? names.join(", ") + (names.length > 1 ? " sprechen…" : " spricht…") : "";
+  $("parent-talking").classList.toggle("hidden", !talkers.length);
+  $("child-unmute").classList.toggle("hidden", !blocked);
+}
+// Tippen auf den Hinweis schaltet den Ton frei.
+$("child-unmute").addEventListener("click", () => {
+  unlockAudio();
+  child.peers.forEach(p => playParentAudio(p));
+  $("child-unmute").classList.add("hidden");
 });
 
-/* ----- Sprechen (Push-to-talk: tippen = an/aus) ----- */
+/* ===========================================================
+   11) ELTERN-GERÄT – empfängt; kann sprechen + eigenes Video
+   =========================================================== */
+const par = {
+  pc: null, ref: null, connId: null, unsubs: [],
+  pending: [], remoteSet: false, offerHandled: false, seenDoc: false, createdAt: 0,
+  connected: false, everConnected: false, attempt: 0,
+  timers: { reconnect: null, grace: null, connect: null, offer: null, stats: null },
+  stats: { bytes: -1, audioBytes: -1, stall: 0, audioStall: 0, sawBytes: false, sawAudio: false, energy: null, dur: null },
+  noAudio: false,
+  mic: null, cam: null, talkOn: false, videoOn: false, busyTalk: false, busyVideo: false,
+  rotation: 0, muted: false,
+};
+
+function startParent(room) {
+  session = { mode: "receive", room, id: "s" + randomId(10) };
+  requestWakeLock();
+  roomData = {};
+  control = defaultControl();
+  Object.assign(par, { attempt: 0, everConnected: false, connected: false, noAudio: false, muted: false });
+  showScreen("parent");
+  setRoomLabels(room);
+  par.rotation = Number(store.get("babyphone_rot_" + room)) || 0;
+  applyRotation();
+  initVolumeUI();
+  updateTalkUI();
+  updateParentVideoUI();
+  showPlaceholder(true);
+  ensureRoom(room);
+  listenRoom(room, onParentRoom);
+  startPresence(room, "receive");
+  connectParent();
+}
+
+function connectParent() {
+  if (!isParent()) return;
+  const room = session.room;
+  teardownParentConn(room);
+  const pc = new RTCPeerConnection(rtcConfig());
+  const ref = doc(connsCol(room));
+  Object.assign(par, {
+    pc, ref, connId: ref.id, pending: [], remoteSet: false,
+    offerHandled: false, seenDoc: false, createdAt: Date.now(), connected: false,
+  });
+
+  pc.ontrack = (e) => { if (pc === par.pc) onParentTrack(e); };
+  pc.onconnectionstatechange = () => { if (pc === par.pc) onParentPcState(); };
+  pc.onicecandidate = (e) => {
+    if (e.candidate && pc === par.pc) quiet(setDoc(doc(collection(ref, "calleeCandidates")), candidateData(e.candidate)));
+  };
+
+  quiet(setDoc(ref, {
+    role: "parent", device: DEVICE_ID, session: session.id, name: myName(),
+    talk: par.talkOn, video: par.videoOn, createdAt: serverTimestamp(),
+  }));
+  par.unsubs.push(onSnapshot(ref, (snap) => onParentConnDoc(pc, snap), (err) => {
+    log("Verbindung", err);
+    if (pc === par.pc) scheduleReconnect(1000);
+  }));
+  par.unsubs.push(onSnapshot(collection(ref, "callerCandidates"), (snap) => {
+    if (pc !== par.pc) return;
+    snap.docChanges().forEach(c => { if (c.type === "added") addCandidate(par, c.doc.data()); });
+  }, (err) => log("ICE", err)));
+  par.timers.offer = setInterval(checkOfferWait, 3000);
+  updateParentWaiting();
+}
+
+function teardownParentConn(room) {
+  const t = par.timers;
+  clearTimeout(t.reconnect); t.reconnect = null;
+  clearTimeout(t.grace); clearTimeout(t.connect); clearInterval(t.offer);
+  stopStatsWatch();
+  par.unsubs.forEach(u => { try { u(); } catch (e) {} });
+  par.unsubs = [];
+  if (par.connId && room) quiet(deleteConnDoc(room, par.connId));
+  closePc(par.pc);
+  par.pc = null; par.ref = null; par.connId = null; par.connected = false;
+}
+
+// Babybett ist da, schickt aber kein Angebot -> Dokument neu anlegen.
+function checkOfferWait() {
+  if (!isParent() || !par.pc || par.offerHandled || par.timers.reconnect) return;
+  if (senderOnline() && Date.now() - par.createdAt > PARENT_OFFER_WAIT_MS) scheduleReconnect(0);
+}
+
+function onParentConnDoc(pc, snap) {
+  if (pc !== par.pc) return;
+  if (!snap.exists()) {
+    // Das Kind hat unser Dokument gelöscht (z.B. Babybett neu gestartet) -> neu verbinden.
+    if (par.seenDoc) scheduleReconnect(0);
+    return;
+  }
+  par.seenDoc = true;
+  const data = snap.data() || {};
+  if (data.offer && !par.offerHandled) {
+    par.offerHandled = true;
+    handleOffer(pc, data.offer);
+  }
+}
+
+async function handleOffer(pc, offer) {
+  try {
+    await pc.setRemoteDescription(offer);
+    if (pc !== par.pc) return;
+    await flushCandidates(par);
+    // Beide Kanäle auf "senden+empfangen", damit wir sprechen / Video zeigen können.
+    pc.getTransceivers().forEach(t => { try { t.direction = "sendrecv"; } catch (e) {} });
+    await attachParentSendTracks(pc);
+    const answer = await pc.createAnswer();
+    if (pc !== par.pc) return;
+    await pc.setLocalDescription(answer);
+    if (pc !== par.pc) return;
+    quiet(updateDoc(par.ref, { answer: { type: answer.type, sdp: answer.sdp } }));
+    setStatus("parent-status", "Verbinde…", "connecting");
+    clearTimeout(par.timers.connect);
+    par.timers.connect = setTimeout(() => {
+      if (pc === par.pc && pc.connectionState !== "connected") scheduleReconnect(0);
+    }, PARENT_CONNECT_TIMEOUT_MS);
+  } catch (e) {
+    log("Angebot annehmen", e);
+    if (pc === par.pc) scheduleReconnect(1000);
+  }
+}
+
+function onParentTrack(e) {
+  const t = e.track;
+  if (t.kind === "video") {
+    const v = $("remote-video");
+    v.srcObject = new MediaStream([t]);
+    v.play().catch(() => {});
+  } else {
+    $("remote-audio").srcObject = new MediaStream([t]);
+    playRemoteAudio();
+  }
+}
+
+function onParentPcState() {
+  const st = par.pc.connectionState;
+  if (st === "connected") {
+    clearTimeout(par.timers.grace); clearTimeout(par.timers.connect);
+    par.connected = true; par.everConnected = true; par.attempt = 0;
+    setStatus("parent-status", "Verbunden", "connected");
+    showPlaceholder(false);
+    startStatsWatch();
+    playRemoteAudio();
+    $("remote-video").play().catch(() => {});
+  } else {
+    par.connected = false;
+    stopStatsWatch();
+    if (st === "disconnected") {
+      setStatus("parent-status", "Verbindung gestört – warte…", "disconnected");
+      showPlaceholder(true);
+      clearTimeout(par.timers.grace);
+      par.timers.grace = setTimeout(() => {
+        if (isParent() && par.pc && par.pc.connectionState !== "connected") scheduleReconnect(0);
+      }, DISCONNECT_GRACE_MS);
+    } else if (st === "failed") {
+      scheduleReconnect(0);
+    }
+  }
+  updateVideoOff();
+}
+
+// Neu verbinden – mit wachsender Pause bei wiederholten Fehlern (0,3 s … 6 s).
+function scheduleReconnect(minDelay) {
+  if (!isParent() || par.timers.reconnect) return;
+  const backoff = par.attempt === 0 ? 300 : Math.min(1000 * Math.pow(2, par.attempt - 1), 6000);
+  par.attempt++;
+  par.connected = false;
+  stopStatsWatch();
+  par.timers.reconnect = setTimeout(() => {
+    par.timers.reconnect = null;
+    connectParent();
+  }, Math.max(minDelay || 0, backoff));
+  showPlaceholder(true);
+  setStatus("parent-status", "Verbinde neu…", "disconnected");
+}
+
+/* ----- Wächter: fließen wirklich Daten? (+ Lautstärke-Anzeige) -----
+   Manchmal meldet eine Verbindung "verbunden", obwohl nichts mehr ankommt.
+   Dann wird neu verbunden. Fehlt nur der Ton, gibt es eine Warnung. */
+function startStatsWatch() {
+  stopStatsWatch();
+  const pc = par.pc;
+  Object.assign(par.stats, { bytes: -1, audioBytes: -1, stall: 0, audioStall: 0, sawBytes: false, sawAudio: false, energy: null, dur: null });
+  par.timers.stats = setInterval(() => pollStats(pc), 1000);
+}
+function stopStatsWatch() {
+  clearInterval(par.timers.stats); par.timers.stats = null;
+  setNoAudio(false);
+  $("level-meter").classList.add("hidden");
+}
+async function pollStats(pc) {
+  if (pc !== par.pc || !par.connected) return;
+  let report;
+  try { report = await pc.getStats(); } catch (e) { return; }
+  if (pc !== par.pc || !par.connected) return;
+  let bytes = 0, audioBytes = 0, energy = null, dur = null;
+  report.forEach(s => {
+    if (s.type !== "inbound-rtp") return;
+    const kind = s.kind || s.mediaType;
+    bytes += s.bytesReceived || 0;
+    if (kind === "audio") {
+      audioBytes += s.bytesReceived || 0;
+      if (typeof s.totalAudioEnergy === "number" && typeof s.totalSamplesDuration === "number") {
+        energy = s.totalAudioEnergy; dur = s.totalSamplesDuration;
+      }
+    }
+  });
+  const st = par.stats;
+  if (bytes > st.bytes) { if (bytes > 0) st.sawBytes = true; st.bytes = bytes; st.stall = 0; }
+  else if (st.sawBytes && ++st.stall >= STALL_RECONNECT_S) { log("Keine Daten mehr – verbinde neu"); scheduleReconnect(0); return; }
+
+  if (audioBytes > st.audioBytes) { if (audioBytes > 0) st.sawAudio = true; st.audioBytes = audioBytes; st.audioStall = 0; }
+  else if (st.sawAudio) st.audioStall++;
+  setNoAudio(st.sawAudio && st.audioStall >= NO_AUDIO_WARN_S);
+
+  if (energy !== null && st.energy !== null && dur > st.dur) {
+    showLevel(Math.sqrt(Math.max(0, energy - st.energy) / (dur - st.dur)));
+  }
+  st.energy = energy; st.dur = dur;
+}
+function showLevel(rms) {
+  const meter = $("level-meter");
+  meter.classList.remove("hidden");
+  const dB = rms > 0 ? 20 * Math.log10(rms) : -100;
+  const bars = Math.max(0, Math.min(5, Math.round((dB + 60) / 10)));
+  meter.querySelectorAll("i").forEach((b, i) => b.classList.toggle("on", i < bars));
+}
+function setNoAudio(on) {
+  if (par.noAudio === on) return;
+  par.noAudio = on;
+  if (!isParent() || !par.connected) return;
+  if (on) setStatus("parent-status", "Verbunden – aber kein Ton!", "warning");
+  else setStatus("parent-status", "Verbunden", "connected");
+}
+
+/* ----- Platzhalter / Hinweise ----- */
+function showPlaceholder(on) {
+  const ph = $("parent-placeholder");
+  ph.classList.toggle("hidden", !on);
+  // Nach einer ersten Verbindung halbtransparent: das letzte Bild ist eingefroren, nicht live.
+  ph.classList.toggle("dim", on && par.everConnected);
+  if (on) updateParentWaiting();
+}
+function updateParentWaiting() {
+  if (!isParent() || par.connected) return;
+  const online = senderOnline();
+  $("parent-placeholder-text").textContent = online
+    ? (par.everConnected ? "Verbindung wird wiederhergestellt…" : "Verbinde mit dem Babybett…")
+    : par.everConnected
+      ? "Das Babybett ist nicht erreichbar.\nIst die App am Babybett-Handy noch offen und das Display an?\nSobald es wieder da ist, verbindet sich alles von selbst."
+      : `Das Babybett ist noch nicht da.\nAm Handy beim Baby den Raum „${session.room}“ öffnen und SENDEN tippen.`;
+  if (!par.timers.reconnect && (!par.pc || par.pc.connectionState !== "disconnected")) {
+    setStatus("parent-status", online ? "Verbinde…" : "Warte auf Babybett…", "connecting");
+  }
+}
+function updateVideoOff() {
+  if (!isParent()) return;
+  const cs = roomData.childState || {};
+  let txt = "";
+  if (par.connected) {
+    if (cs.hasVideo === false) txt = "Keine Kamera am Babybett – nur Ton";
+    else if (!control.childVideoEnabled) txt = "Video ist aus – nur Ton";
+  }
+  $("video-off-text").textContent = txt;
+  $("video-off").classList.toggle("hidden", !txt);
+}
+
+function updateParentPresenceUI() {
+  const c = readPresence(presence.docs);
+  const others = c.parents.filter(x => x.device !== DEVICE_ID);
+  const el = $("parent-presence");
+  const childTxt = c.children.length ? escapeHtml(c.children.map(x => x.name).join(", ")) : "Babybett offline";
+  let html = `<span class="who"><span class="${c.children.length ? "on" : "off"}">${ICON.broadcast}</span> ${childTxt}</span>`;
+  if (others.length) html += `<span class="who">${ICON.eye} ${escapeHtml(others.map(x => x.name).join(", "))}</span>`;
+  el.innerHTML = html;
+  el.classList.remove("hidden");
+
+  const rows = [];
+  c.children.forEach(x => rows.push(`<div class="presence-row">${ICON.person}<span class="who-name">${escapeHtml(x.name)}</span><span class="who-tag child">Babybett</span></div>`));
+  c.parents.forEach(x => rows.push(`<div class="presence-row">${ICON.person}<span class="who-name">${escapeHtml(x.name)}${x.device === DEVICE_ID ? " (dieses Gerät)" : ""}</span><span class="who-tag parent">Eltern</span></div>`));
+  $("presence-list").innerHTML = rows.length ? rows.join("") : '<span class="muted">Noch niemand im Raum.</span>';
+}
+
+/* ----- Ton der Eltern-Seite ----- */
+function playRemoteAudio() {
+  const a = $("remote-audio");
+  if (!isParent() || !a.srcObject) return;
+  a.muted = par.muted;
+  if (CAN_SET_VOLUME) a.volume = Number($("volume-slider").value) / 100;
+  const p = a.play();
+  if (p && p.then) {
+    p.then(() => $("unmute-overlay").classList.add("hidden"))
+     .catch(e => { if (e && e.name === "NotAllowedError" && isParent()) $("unmute-overlay").classList.remove("hidden"); });
+  }
+}
+// Hält das System die Wiedergabe an (z.B. nach Mikrofon-Zugriff am iPhone) -> weiterspielen.
+$("remote-audio").addEventListener("pause", () => {
+  if (isParent() && $("remote-audio").srcObject) setTimeout(playRemoteAudio, 400);
+});
+$("unmute-overlay").addEventListener("click", () => {
+  unlockAudio();
+  $("unmute-overlay").classList.add("hidden");
+  playRemoteAudio();
+  $("remote-video").play().catch(() => {});
+});
+
+function initVolumeUI() {
+  const v = Number(store.get("babyphone_volume") || 100);
+  $("volume-slider").value = isNaN(v) ? 100 : v;
+  $("volume-row").classList.toggle("no-slider", !CAN_SET_VOLUME);
+  updateMuteUI();
+}
+$("volume-slider").addEventListener("input", (e) => {
+  const v = Number(e.target.value);
+  store.set("babyphone_volume", String(v));
+  const a = $("remote-audio");
+  if (CAN_SET_VOLUME) a.volume = v / 100;
+  if (v > 0 && par.muted) setMuted(false);
+});
+$("mute-btn").addEventListener("click", () => setMuted(!par.muted));
+function setMuted(m) {
+  par.muted = m;
+  $("remote-audio").muted = m;
+  updateMuteUI();
+  if (!m) playRemoteAudio();
+}
+function updateMuteUI() {
+  const btn = $("mute-btn");
+  btn.classList.toggle("muted", par.muted);
+  btn.querySelector(".vol-icon").innerHTML = par.muted ? ICON["volume-off"] : ICON["volume-high"];
+}
+
+/* ----- Sprechen (tippen = an, nochmal tippen = aus) ----- */
 $("talk-btn").addEventListener("click", toggleTalk);
 async function toggleTalk() {
-  unlockMedia();
-  talkOn = !talkOn;
-  $("talk-btn").classList.toggle("active", talkOn);
-  if (talkOn) {
-    if (!parentMicStream) {
-      try { parentMicStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
-      catch (e) { talkOn = false; $("talk-btn").classList.remove("active"); alert("Kein Zugriff aufs Mikrofon."); return; }
+  if (!isParent() || par.busyTalk) return;
+  par.busyTalk = true;
+  try {
+    unlockAudio();
+    if (!par.talkOn) {
+      let s;
+      try { s = await getMedia({ audio: AUDIO_CONSTRAINTS }); }
+      catch (e) { log(e); alert("Kein Zugriff aufs Mikrofon.\nBitte in den Einstellungen erlauben."); return; }
+      if (!isParent()) { stopStream(s); return; }
+      par.mic = s; par.talkOn = true;
+    } else {
+      par.talkOn = false;
     }
-    await sendParentTrack("audio", parentMicStream.getAudioTracks()[0]);
-  } else {
-    await sendParentTrack("audio", null);
+    updateTalkUI();
+    await setParentSendTrack("audio", par.talkOn && par.mic ? par.mic.getAudioTracks()[0] : null);
+    // Mikrofon wirklich freigeben, wenn nicht gesprochen wird (Datenschutz + iPhone-Lautstärke).
+    if (!par.talkOn) { stopStream(par.mic); par.mic = null; }
+    publishParentFlags();
+    playRemoteAudio();   // iPhone: Wiedergabe nach Mikrofon-Zugriff wieder anwerfen
+  } finally {
+    par.busyTalk = false;
   }
+}
+function updateTalkUI() {
+  $("talk-btn").classList.toggle("active", par.talkOn);
+  $("talk-btn").querySelector(".lbl").textContent = par.talkOn ? "Spricht…" : "Sprechen";
 }
 
 /* ----- Eigenes Video zeigen (Eltern -> Kind) ----- */
 $("parent-video-btn").addEventListener("click", toggleParentVideo);
 async function toggleParentVideo() {
-  parentVideoOn = !parentVideoOn;
-  $("parent-video-btn").classList.toggle("active", parentVideoOn);
-  if (parentVideoOn) {
-    if (!parentCamStream) {
-      try { parentCamStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", ...QUALITY[control.quality] } }); }
-      catch (e) { parentVideoOn = false; $("parent-video-btn").classList.remove("active"); alert("Kein Zugriff auf die Kamera."); return; }
+  if (!isParent() || par.busyVideo) return;
+  par.busyVideo = true;
+  try {
+    if (!par.videoOn) {
+      let s;
+      try { s = await getMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 20 } } }); }
+      catch (e) { log(e); alert("Kein Zugriff auf die Kamera.\nBitte in den Einstellungen erlauben."); return; }
+      if (!isParent()) { stopStream(s); return; }
+      par.cam = s; par.videoOn = true;
+      $("parent-self-video").srcObject = s;
+      $("parent-self-video").play().catch(() => {});
+    } else {
+      par.videoOn = false;
     }
-    $("parent-self-video").srcObject = parentCamStream;
-    $("parent-self-video").classList.remove("hidden");
-    await sendParentTrack("video", parentCamStream.getVideoTracks()[0]);
-  } else {
-    $("parent-self-video").classList.add("hidden");
-    await sendParentTrack("video", null);
+    updateParentVideoUI();
+    await setParentSendTrack("video", par.videoOn && par.cam ? par.cam.getVideoTracks()[0] : null);
+    if (!par.videoOn) { stopStream(par.cam); par.cam = null; $("parent-self-video").srcObject = null; }
+    publishParentFlags();
+    if (par.videoOn && !control.showParentVideoOnChild) toast("Hinweis: „Mein Video beim Kind zeigen“ ist im Menü ausgeschaltet.", 5000);
+    playRemoteAudio();
+  } finally {
+    par.busyVideo = false;
   }
 }
-
-// Eine Eltern-Spur (audio/video) in die laufende Verbindung legen.
-async function sendParentTrack(kind, track) {
-  if (!parentPc) return;
-  const s = senderForKind(parentPc, kind);
-  if (s) { try { await s.replaceTrack(track); } catch (e) {} }
-}
-// Nach (Neu-)Verbindung Sprechen/Video wieder herstellen.
-async function reattachParentTracks() {
-  if (talkOn && parentMicStream) await sendParentTrack("audio", parentMicStream.getAudioTracks()[0]);
-  if (parentVideoOn && parentCamStream) await sendParentTrack("video", parentCamStream.getVideoTracks()[0]);
+function updateParentVideoUI() {
+  $("parent-video-btn").classList.toggle("active", par.videoOn);
+  $("parent-self-video").classList.toggle("hidden", !par.videoOn);
 }
 
-/* ----- Fernsteuer-Bedienelemente (Menü) ----- */
+async function setParentSendTrack(kind, track) {
+  const s = senderOf(par.pc, kind);
+  if (s) await quiet(s.replaceTrack(track));
+}
+async function attachParentSendTracks(pc) {
+  const a = senderOf(pc, "audio"), v = senderOf(pc, "video");
+  if (a) await quiet(a.replaceTrack(par.talkOn && par.mic ? par.mic.getAudioTracks()[0] : null));
+  if (v) await quiet(v.replaceTrack(par.videoOn && par.cam ? par.cam.getVideoTracks()[0] : null));
+}
+// Dem Kind-Gerät mitteilen, ob gerade gesprochen / Video gezeigt wird.
+function publishParentFlags() {
+  if (par.ref) quiet(updateDoc(par.ref, { talk: par.talkOn, video: par.videoOn }));
+}
+
+/* ----- Fernsteuerung (Menü) ----- */
 $("rc-child-video").addEventListener("change", (e) => setControl({ childVideoEnabled: e.target.checked }));
 $("rc-show-parent").addEventListener("change", (e) => setControl({ showParentVideoOnChild: e.target.checked }));
 $("rc-quality").addEventListener("change", (e) => setControl({ quality: e.target.value }));
-$("rc-child-volume").addEventListener("input", (e) => setControl({ childVolume: Number(e.target.value) }));
-$("rc-camera").addEventListener("change", (e) => setControl({ cameraId: e.target.value }));
+$("rc-camera").addEventListener("change", (e) => { if (e.target.value) setControl({ cameraId: e.target.value }); });
+const sendChildVolume = throttle((v) => setControl({ childVolume: v }), 400);
+$("rc-child-volume").addEventListener("input", (e) => sendChildVolume(Number(e.target.value)));
+$("rc-child-volume").addEventListener("change", (e) => setControl({ childVolume: Number(e.target.value) }));
 
-function syncRemoteControlsUI() {
-  $("rc-child-video").checked = control.childVideoEnabled;
-  $("rc-show-parent").checked = control.showParentVideoOnChild;
-  $("rc-quality").value = control.quality;
-  $("rc-child-volume").value = control.childVolume;
-  // Kamera-Auswahl (vom Kind gemeldete Kameras) füllen
-  const sel = $("rc-camera");
-  sel.innerHTML = '<option value="">Standard-Kamera</option>' +
-    roomCameras.map(c => `<option value="${escapeHtml(c.id)}">${escapeHtml(c.label)}</option>`).join("");
-  sel.value = control.cameraId || "";
+function onParentRoom() {
+  syncRemoteControlsUI();
+  updateVideoOff();
 }
 
-/* ----- Bild drehen (nur für die eigene Eltern-Ansicht) ----- */
-let remoteRotation = 0;
-$("rotate-btn").addEventListener("click", () => {
-  remoteRotation = (remoteRotation + 90) % 360;
-  applyRotation();
-});
-function applyRotation() {
-  const v = $("remote-video");
-  v.style.right = "auto"; v.style.bottom = "auto";
-  v.style.top = "50%"; v.style.left = "50%";
-  v.style.transform = `translate(-50%, -50%) rotate(${remoteRotation}deg)`;
-  if (remoteRotation === 90 || remoteRotation === 270) {
-    v.style.width = "100vh"; v.style.height = "100vw";
+let lastCamerasKey = "";
+function syncRemoteControlsUI() {
+  if (!isParent()) return;
+  const active = document.activeElement;
+  // Elemente, die gerade bedient werden, nicht überschreiben (sonst springt der Regler).
+  const setIfIdle = (el, prop, val) => { if (el !== active) el[prop] = val; };
+  setIfIdle($("rc-child-video"), "checked", !!control.childVideoEnabled);
+  setIfIdle($("rc-show-parent"), "checked", !!control.showParentVideoOnChild);
+  setIfIdle($("rc-quality"), "value", control.quality);
+  setIfIdle($("rc-child-volume"), "value", control.childVolume);
+
+  const cs = roomData.childState || {};
+  const cams = Array.isArray(roomData.cameras) ? roomData.cameras : [];
+  const sel = $("rc-camera");
+  const key = JSON.stringify(cams);
+  if (key !== lastCamerasKey && sel !== active) {
+    lastCamerasKey = key;
+    sel.innerHTML = "";
+    if (!cams.length) sel.appendChild(new Option("Keine Kameras gemeldet", ""));
+    cams.forEach(c => sel.appendChild(new Option(c.label || "Kamera", c.id)));
+  }
+  const want = cams.some(c => c.id === control.cameraId) ? control.cameraId : (cs.cameraId || "");
+  if (sel !== active && cams.some(c => c.id === want)) sel.value = want;
+  sel.disabled = !cams.length;
+
+  const noVolume = cs.canSetVolume === false;
+  $("rc-child-volume").disabled = noVolume;
+  $("rc-volume-hint").classList.toggle("hidden", !noVolume);
+
+  // Rückmeldung: Ist die Einstellung am Kind-Gerät angekommen?
+  const el = $("rc-state");
+  el.classList.remove("ok", "warn");
+  if (!senderOnline()) {
+    el.textContent = "Babybett ist offline – Änderungen gelten, sobald es wieder da ist.";
+    el.classList.add("warn");
+  } else if (cs.hasVideo === false) {
+    el.textContent = "Am Babybett läuft keine Kamera – es wird nur Ton gesendet.";
+    el.classList.add("warn");
   } else {
-    v.style.width = "100vw"; v.style.height = "100vh";
+    const camPending = control.cameraId && cams.some(c => c.id === control.cameraId) && cs.cameraId !== control.cameraId;
+    const pending = cs.quality !== control.quality || cs.videoOn !== !!control.childVideoEnabled || camPending;
+    if (camPending && cs.cameraError) { el.textContent = "Diese Kamera ließ sich am Babybett nicht öffnen."; el.classList.add("warn"); }
+    else if (pending) el.textContent = "Wird übertragen…";
+    else { el.textContent = "✓ Babybett ist auf dem aktuellen Stand."; el.classList.add("ok"); }
   }
 }
 
-/* ----- Hintergrund-Ton (experimentell) -----
-   Hinweis: Auf dem iPhone unterbindet das System Hintergrund-Ton von Webseiten
-   weitgehend. Auf Android/Desktop läuft der Ton oft ohnehin weiter. Wir halten
-   nur den Audio-Kanal „wach" – ohne doppelten Ton-Pfad (sonst Echo/Doppel-Ton). */
-let bgAudio = localStorage.getItem("babyphone_bg_audio") === "1";
-$("rc-bg-audio").addEventListener("change", (e) => {
-  bgAudio = e.target.checked;
-  localStorage.setItem("babyphone_bg_audio", bgAudio ? "1" : "0");
-  if (bgAudio) unlockMedia();
+/* ----- Bild drehen (nur für die eigene Eltern-Ansicht, wird pro Raum gemerkt) ----- */
+$("rotate-btn").addEventListener("click", () => {
+  if (!isParent()) return;
+  par.rotation = (par.rotation + 90) % 360;
+  store.set("babyphone_rot_" + session.room, String(par.rotation));
+  applyRotation();
 });
+function applyRotation() {
+  const v = $("remote-video"), wrap = $("remote-wrap");
+  const r = par.rotation;
+  if (!r) { v.style.cssText = ""; return; }
+  const W = wrap.clientWidth || window.innerWidth, H = wrap.clientHeight || window.innerHeight;
+  const side = r === 90 || r === 270;
+  v.style.cssText = `inset:auto;left:50%;top:50%;width:${side ? H : W}px;height:${side ? W : H}px;` +
+    `transform:translate(-50%,-50%) rotate(${r}deg);`;
+}
+window.addEventListener("resize", () => { if (isParent()) applyRotation(); });
 
 /* ===========================================================
-   13) Menüs (Bottom-Sheets) + Beenden
+   12) Menüs (Bottom-Sheets) + Beenden
    =========================================================== */
 document.querySelectorAll("[data-open]").forEach(btn => {
-  btn.addEventListener("click", () => $(btn.dataset.open).classList.remove("hidden"));
+  btn.addEventListener("click", () => {
+    $(btn.dataset.open).classList.remove("hidden");
+    if (btn.dataset.open === "parent-menu") { updateParentPresenceUI(); syncRemoteControlsUI(); }
+  });
 });
 document.querySelectorAll(".close-sheet").forEach(btn => {
   btn.addEventListener("click", () => btn.closest(".sheet").classList.add("hidden"));
@@ -1004,69 +1741,109 @@ document.querySelectorAll(".sheet").forEach(sheet => {
 });
 document.querySelectorAll(".stop-btn").forEach(btn => {
   btn.addEventListener("click", () => {
-    if (confirm("Babyphone wirklich beenden?")) { stopEverything(); showScreen("home"); }
+    if (confirm("Babyphone wirklich beenden?")) { stopSession(); showScreen("home"); }
   });
 });
 
-function stopEverything() {
-  const room = currentSession ? currentSession.room : null;
-  currentSession = null;
-
-  document.querySelectorAll(".sheet").forEach(m => m.classList.add("hidden"));
-  $("screen-off-curtain").classList.add("hidden");
-  $("unmute-overlay").classList.add("hidden");
-  $("parent-talking").classList.add("hidden");
+function stopSession() {
+  const s = session;
+  session = null;
   hideStartGate();
   pendingStart = null;
-  $("parent-stage").innerHTML = "";
-  $("parent-stage").classList.add("hidden");
-  parentTiles.clear();
-  childAudioStream = null;
-  $("parent-audio").srcObject = null;
-  $("child-unmute").classList.add("hidden");
-  $("child-presence").classList.add("hidden");
-  $("parent-presence").classList.add("hidden");
+  document.querySelectorAll(".sheet").forEach(m => m.classList.add("hidden"));
+  ["screen-off-curtain", "unmute-overlay", "child-unmute", "parent-talking", "child-info",
+   "video-off", "parent-presence", "level-meter", "parent-self-video"].forEach(id => $(id).classList.add("hidden"));
+  if (!s) return;
 
-  // Drehung zurücksetzen
-  remoteRotation = 0;
-  $("remote-video").style.cssText = "";
-
-  if (controlUnsub) { try { controlUnsub(); } catch (e) {} controlUnsub = null; }
-  stopPresence(room);
+  stopRoomListener();
+  stopPresence(s.room);
 
   // Kind stoppen
-  if (childUnsub) { try { childUnsub(); } catch (e) {} childUnsub = null; }
-  childPeers.forEach((pc, id) => { if (room) deleteConnectionDoc(room, id); try { pc.close(); } catch (e) {} });
-  childPeers.clear();
-  childVideoTrack = null;
+  if (child.connUnsub) { try { child.connUnsub(); } catch (e) {} child.connUnsub = null; }
+  [...child.peers.keys()].forEach(id => closeChildPeer(id, s.mode === "send" ? s.room : null));
+  clearTimeout(child.micRetry);
+  stopStream(child.stream);
+  child.stream = child.audio = child.video = null;
+  child.hasVideo = false;
+  $("parent-stage").innerHTML = "";
+  $("parent-stage").className = "parent-stage hidden";
+  $("parent-audios").innerHTML = "";
+  $("local-video").srcObject = null;
 
   // Eltern stoppen
-  clearTimeout(reconnectTimer); reconnecting = false;
-  parentUnsubs.forEach(u => { try { u(); } catch (e) {} });
-  parentUnsubs = [];
-  if (parentConnId && room) deleteConnectionDoc(room, parentConnId);
-  parentConnId = null;
-  if (parentPc) { try { parentPc.close(); } catch (e) {} parentPc = null; }
-  talkOn = false; parentVideoOn = false;
-  $("talk-btn") && $("talk-btn").classList.remove("active");
-  $("parent-video-btn") && $("parent-video-btn").classList.remove("active");
-  $("parent-self-video").classList.add("hidden");
-
-  // Medien freigeben
-  [localStream, parentMicStream, parentCamStream].forEach(s => { if (s) s.getTracks().forEach(t => t.stop()); });
-  localStream = parentMicStream = parentCamStream = null;
-  $("local-video").srcObject = null;
+  teardownParentConn(s.room);
+  stopStream(par.mic); stopStream(par.cam);
+  par.mic = par.cam = null;
+  par.talkOn = par.videoOn = false;
+  updateTalkUI();
+  updateParentVideoUI();
   $("remote-video").srcObject = null;
+  $("remote-video").style.cssText = "";
+  $("remote-audio").srcObject = null;
   $("parent-self-video").srcObject = null;
 
+  roomData = {};
+  control = defaultControl();
   releaseWakeLock();
   if (location.search) history.replaceState(null, "", location.pathname);
 }
 
-window.addEventListener("pagehide", () => {
-  const room = currentSession ? currentSession.room : null;
-  if (!room) return;
-  if (parentConnId) deleteConnectionDoc(room, parentConnId);
-  childPeers.forEach((pc, id) => deleteConnectionDoc(room, id));
-  deleteDoc(doc(db, "rooms", room, "presence", myDeviceId)).catch(() => {});
+/* ===========================================================
+   13) Hintergrund, Netzwechsel, Schließen
+   =========================================================== */
+// Firestore nach Netzwechsel/Standby sofort neu verbinden lassen (statt bis zu 1 Min. zu warten).
+let lastKick = 0;
+function kickFirestore() {
+  if (Date.now() - lastKick < 10000) return;
+  lastKick = Date.now();
+  disableNetwork(db).then(() => enableNetwork(db)).catch(e => log(e));
+}
+
+let hiddenSince = 0;
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") { hiddenSince = Date.now(); return; }
+  const away = hiddenSince ? Date.now() - hiddenSince : 0;
+  hiddenSince = 0;
+  if (away > 15000) kickFirestore();
+  if (!session) return;
+  requestWakeLock();
+  if (isChild()) {
+    childEnqueue(recoverChildMedia);
+    $("local-video").play().catch(() => {});
+    child.peers.forEach(p => { if (p.talk) playParentAudio(p); });
+  }
+  if (isParent()) {
+    playRemoteAudio();
+    $("remote-video").play().catch(() => {});
+    const st = par.pc ? par.pc.connectionState : "closed";
+    if (st === "failed" || st === "closed") scheduleReconnect(0);
+  }
 });
+
+window.addEventListener("online", () => {
+  kickFirestore();
+  if (isParent() && !par.connected) scheduleReconnect(0);
+});
+
+// Aus dem Zurück-Cache wiederhergestellt -> sauber neu laden.
+window.addEventListener("pageshow", (e) => { if (e.persisted) location.reload(); });
+
+// Beim Schließen: eigene Einträge entfernen (einzelne Schreibvorgänge, damit es noch rausgeht).
+window.addEventListener("pagehide", () => {
+  if (!session) return;
+  const room = session.room;
+  if (par.connId) quiet(deleteDoc(connRef(room, par.connId)));
+  child.peers.forEach((p, id) => quiet(deleteDoc(connRef(room, id))));
+  if (presence.ref) quiet(deleteDoc(presence.ref));
+});
+
+// Zur Fehlersuche in der Browser-Konsole: babyphoneDebug.info()
+window.babyphoneDebug = {
+  info() {
+    return {
+      session, control, roomData,
+      child: { peers: [...child.peers.values()].map(p => ({ id: p.id, name: p.name, state: p.pc.connectionState, talk: p.talk, video: p.video })), cameraId: child.cameraId, hasVideo: child.hasVideo },
+      parent: { connId: par.connId, state: par.pc ? par.pc.connectionState : null, connected: par.connected, attempt: par.attempt, talkOn: par.talkOn, videoOn: par.videoOn },
+    };
+  },
+};
