@@ -16,7 +16,7 @@
 
   <title>Babyphone</title>
   <!-- ?v=… sorgt dafür, dass Handys nach einem Update die neue Version laden -->
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
 
@@ -104,7 +104,8 @@
       <div class="status-pill" id="child-status">Verbinde…</div>
       <div class="info-chip hidden" id="child-info"></div>
     </div>
-    <button type="button" class="corner-btn acrylic" data-open="child-menu" aria-label="Menü"><span class="ic" data-icon="gear"></span></button>
+    <button type="button" class="corner-btn acrylic" data-open="child-menu" aria-label="Einstellungen"><span class="ic" data-icon="gear"></span></button>
+    <button type="button" class="corner-btn corner-right acrylic" data-exit aria-label="Raum verlassen" title="Raum verlassen"><span class="ic" data-icon="leave"></span></button>
 
     <div id="parent-talking" class="talk-indicator hidden"><span class="ic" data-icon="volume-high"></span> <span id="parent-talking-text">Eltern sprechen…</span></div>
 
@@ -161,9 +162,12 @@
 
     <video id="parent-self-video" class="pip hidden" autoplay playsinline muted></video>
 
+    <!-- Nachtansicht statt eingefrorenem Bild (Video aus, Akku sparen, Bild hängt) -->
     <div id="video-off" class="video-off hidden">
-      <span class="ic" data-icon="video-off"></span>
+      <span class="night-moon" data-icon="moon"></span>
+      <div id="night-clock" class="night-clock">–:–</div>
       <p id="video-off-text">Video ist aus – nur Ton</p>
+      <div id="night-audio" class="night-audio hidden"><i></i><i></i><i></i><span>Ton läuft weiter</span></div>
     </div>
 
     <div id="parent-placeholder" class="placeholder">
@@ -183,7 +187,8 @@
       <div class="presence-chip hidden" id="parent-presence"></div>
       <div class="info-chip hidden" id="parent-info"></div>
     </div>
-    <button type="button" class="corner-btn acrylic" data-open="parent-menu" aria-label="Menü"><span class="ic" data-icon="gear"></span></button>
+    <button type="button" class="corner-btn acrylic" data-open="parent-menu" aria-label="Fernsteuerung"><span class="ic" data-icon="gear"></span></button>
+    <button type="button" class="corner-btn corner-right acrylic" data-exit aria-label="Raum verlassen" title="Raum verlassen"><span class="ic" data-icon="leave"></span></button>
 
     <!-- Untere Steuerleiste Eltern -->
     <div class="parent-controls">
@@ -196,6 +201,7 @@
         <button id="talk-btn" type="button" class="dock-btn talk"><span class="ic" data-icon="mic"></span><span class="lbl">Sprechen</span></button>
         <button id="parent-video-btn" type="button" class="dock-btn"><span class="ic" data-icon="video"></span><span class="lbl">Mein Video</span></button>
         <button id="rotate-btn" type="button" class="dock-btn"><span class="ic" data-icon="rotate"></span><span class="lbl">Drehen</span></button>
+        <button id="parent-eco-btn" type="button" class="dock-btn"><span class="ic" data-icon="battery"></span><span class="lbl">Akku</span></button>
         <button type="button" class="dock-btn" data-open="parent-menu"><span class="ic" data-icon="sliders"></span><span class="lbl">Steuern</span></button>
       </nav>
     </div>
@@ -268,8 +274,22 @@
     </div>
   </div>
 
+  <!-- ===== Eigener Dialog (statt System-Popups) ===== -->
+  <div id="dialog" class="start-gate dialog-layer hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+    <div class="dialog">
+      <div class="dialog-body">
+        <h2 id="dialog-title" class="dialog-title"></h2>
+        <p id="dialog-text" class="dialog-text"></p>
+      </div>
+      <div class="dialog-footer">
+        <button id="dialog-ok" type="button" class="btn btn-accent">OK</button>
+        <button id="dialog-cancel" type="button" class="btn">Abbrechen</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast acrylic hidden" role="status" aria-live="polite"></div>
 
-  <script type="module" src="app.js?v=4"></script>
+  <script type="module" src="app.js?v=5"></script>
 </body>
 </html>

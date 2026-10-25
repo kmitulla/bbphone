@@ -173,6 +173,30 @@ function toast(msg, ms = 3500) {
   toastTimer = setTimeout(() => el.classList.add("hidden"), ms);
 }
 
+/* Eigener Dialog im Windows-11-Stil (statt der grauen System-Popups). Liefert true/false. */
+let dialogResolve = null;
+function showDialog({ title, text = "", okLabel = "OK", cancelLabel = "Abbrechen", danger = false, showCancel = true }) {
+  if (dialogResolve) closeDialog(false);
+  $("dialog-title").textContent = title;
+  $("dialog-text").textContent = text;
+  $("dialog-ok").textContent = okLabel;
+  $("dialog-ok").className = "btn " + (danger ? "btn-danger" : "btn-accent");
+  $("dialog-cancel").textContent = cancelLabel;
+  $("dialog-cancel").classList.toggle("hidden", !showCancel);
+  $("dialog").classList.remove("hidden");
+  console.info("[Dialog] " + title + ": " + text.replace(/\n+/g, " "));
+  return new Promise(resolve => { dialogResolve = resolve; });
+}
+function closeDialog(result) {
+  $("dialog").classList.add("hidden");
+  const r = dialogResolve; dialogResolve = null;
+  if (r) r(result);
+}
+$("dialog-ok").addEventListener("click", () => closeDialog(true));
+$("dialog-cancel").addEventListener("click", () => closeDialog(false));
+const showConfirm = (title, text, okLabel, danger = true) => showDialog({ title, text, okLabel, danger });
+const showAlert = (title, text) => showDialog({ title, text, showCancel: false });
+
 function setStatus(elId, text, kind) {
   const el = $(elId); if (!el) return;
   el.textContent = text;
@@ -205,6 +229,8 @@ const ICON = {
   door: SVG('<path d="M3 21h18"/><path d="M6 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16"/><circle cx="14.5" cy="12" r="1" fill="currentColor" stroke="none"/>'),
   "mic-off": SVG('<line x1="2" y1="2" x2="22" y2="22"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"/><path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>'),
   leaf: SVG('<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/><path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>'),
+  leave: SVG('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'),
+  battery: SVG('<rect x="2" y="7" width="17" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/><polyline points="11 8.5 8 12 12 12 9 15.5"/>'),
   add: SVG('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
   chevron: SVG('<polyline points="9 6 15 12 9 18"/>'),
   info: SVG('<circle cx="12" cy="12" r="9.5"/><line x1="12" y1="11" x2="12" y2="16.5"/><circle cx="12" cy="7.8" r=".6" fill="currentColor"/>'),
@@ -436,10 +462,10 @@ async function deleteRoom(name) {
   const it = roomItems.get(name);
   const c = readPresence(it ? it.docs : []);
   if (c.children.length || c.parents.length) {
-    alert(`Im Raum „${name}“ sind gerade Geräte aktiv.\nBitte dort zuerst beenden.`);
+    showAlert("Raum wird benutzt", `Im Raum „${name}“ sind gerade Geräte aktiv.\nBitte dort zuerst beenden.`);
     return;
   }
-  if (!confirm(`Raum „${name}“ löschen?`)) return;
+  if (!(await showConfirm("Raum löschen?", `Der Raum „${name}“ wird aus der Liste entfernt.`, "Löschen"))) return;
   try {
     const conns = await getDocs(connsCol(name));
     await Promise.all(conns.docs.map(d => deleteConnDoc(name, d.id)));
@@ -708,6 +734,8 @@ function childEnqueue(fn) {
   return child.queue;
 }
 function videoSendTrack() { return (control.childVideoEnabled && child.video) ? child.video : null; }
+// Video für ein bestimmtes Eltern-Gerät (im Akku-Sparmodus der Eltern: keins).
+function peerVideoTrack(p) { return p.wantVideo === false ? null : videoSendTrack(); }
 
 async function startChild(room) {
   const my = session = { mode: "send", room, id: "s" + randomId(10) };
@@ -721,7 +749,7 @@ async function startChild(room) {
   // Sendet in diesem Raum schon ein anderes Gerät?
   const other = await findOtherSender(room);
   if (session !== my) return;
-  if (other && !confirm(`In diesem Raum sendet schon „${other}“.\n\nSoll dieses Gerät übernehmen? Das andere hört dann auf zu senden.`)) {
+  if (other && !(await showConfirm("Babybett übernehmen?", `In diesem Raum sendet schon „${other}“.\nSoll dieses Gerät übernehmen? Das andere hört dann auf zu senden.`, "Übernehmen", false))) {
     stopSession(); showScreen("home"); return;
   }
 
@@ -778,8 +806,8 @@ async function openChildMedia() {
       return s;
     } catch (e) { lastErr = e; if (e.name === "NotAllowedError") denied = true; }
   }
-  alert(denied
-    ? "Kein Zugriff auf Kamera/Mikrofon.\n\nBitte erlauben (iPhone: Einstellungen → Safari → Kamera bzw. Mikrofon → Erlauben) und dann erneut SENDEN tippen."
+  showAlert(denied ? "Kein Zugriff" : "Kamera/Mikrofon geht nicht", denied
+    ? "Kein Zugriff auf Kamera/Mikrofon.\nBitte erlauben (iPhone: Einstellungen → Safari → Kamera bzw. Mikrofon → Erlauben) und dann erneut SENDEN tippen."
     : "Kamera/Mikrofon konnte nicht gestartet werden.\n(" + ((lastErr && (lastErr.message || lastErr.name)) || "Fehler") + ")");
   return null;
 }
@@ -828,7 +856,7 @@ async function swapChildTrack(kind, track) {
   else { child.video = track; child.hasVideo = !!track; }
   for (const p of child.peers.values()) {
     const s = senderOf(p.pc, kind);
-    if (s) await quiet(s.replaceTrack(kind === "video" ? videoSendTrack() : track));
+    if (s) await quiet(s.replaceTrack(kind === "video" ? peerVideoTrack(p) : track));
   }
   if (kind === "video") showLocalPreview();
 }
@@ -986,7 +1014,7 @@ function onChildRoom(snap) {
     const who = snd.name || "ein anderes Gerät";
     stopSession();
     showScreen("home");
-    alert(`In diesem Raum sendet jetzt „${who}“.\nDieses Gerät hat das Senden beendet.`);
+    showAlert("Senden beendet", `In diesem Raum sendet jetzt „${who}“.\nDieses Gerät hat das Senden beendet.`);
     return;
   }
   childEnqueue(applyControlOnChild);
@@ -1009,10 +1037,9 @@ async function applyControlOnChild() {
   // 2) Video an/aus
   if (child.applied.videoOn !== control.childVideoEnabled) {
     child.applied.videoOn = control.childVideoEnabled;
-    const t = videoSendTrack();
     for (const p of child.peers.values()) {
       const s = senderOf(p.pc, "video");
-      if (s) await quiet(s.replaceTrack(t));
+      if (s) await quiet(s.replaceTrack(peerVideoTrack(p)));
     }
   }
   // 3) Mikrofon an/aus. "enabled = false" sendet Stille weiter -> die Verbindung bleibt stabil.
@@ -1136,7 +1163,7 @@ async function createChildPeer(id, data) {
   const pc = new RTCPeerConnection(rtcConfig());
   const p = {
     id, ref, pc, pending: [], remoteSet: false, offered: false, answered: false, closed: false,
-    name: data.name || "Eltern", talk: !!data.talk, video: !!data.video,
+    name: data.name || "Eltern", talk: !!data.talk, video: !!data.video, wantVideo: data.wantVideo !== false,
     audioEl: null, tile: null, blocked: false, timer: null, unsubs: [],
   };
   child.peers.set(id, p);
@@ -1144,7 +1171,7 @@ async function createChildPeer(id, data) {
   try {
     // Zwei Zwei-Wege-Kanäle: Video und Audio. So können die Eltern später
     // sprechen/Video zeigen, ohne dass neu verhandelt werden muss.
-    pc.addTransceiver(videoSendTrack() || "video", { direction: "sendrecv", streams: [child.stream] });
+    pc.addTransceiver(peerVideoTrack(p) || "video", { direction: "sendrecv", streams: [child.stream] });
     pc.addTransceiver(child.audio || "audio", { direction: "sendrecv", streams: [child.stream] });
 
     pc.ontrack = (e) => attachParentTrack(p, e.track);
@@ -1195,6 +1222,12 @@ function onPeerDoc(p, data) {
     p.pc.setRemoteDescription(data.answer)
       .then(() => flushCandidates(p))
       .catch(e => { log("Antwort", e); if (session) closeChildPeer(p.id, session.room); });
+  }
+  const wantVideo = data.wantVideo !== false;
+  if (wantVideo !== p.wantVideo) {
+    p.wantVideo = wantVideo;
+    const s = senderOf(p.pc, "video");
+    if (s) quiet(s.replaceTrack(peerVideoTrack(p)));
   }
   const talk = !!data.talk, video = !!data.video, name = data.name || "Eltern";
   if (talk !== p.talk || video !== p.video || name !== p.name) {
@@ -1299,6 +1332,7 @@ const par = {
   noAudio: false,
   mic: null, cam: null, talkTrack: null, voice: null, talkOn: false, videoOn: false, busyTalk: false, busyVideo: false,
   rotation: 0, muted: false,
+  eco: false, videoFrozen: false,
 };
 
 function startParent(room) {
@@ -1310,6 +1344,9 @@ function startParent(room) {
   showScreen("parent");
   setRoomLabels(room);
   par.rotation = Number(store.get("babyphone_rot_" + room)) || 0;
+  par.eco = store.get("babyphone_parent_eco") === "1";
+  par.videoFrozen = false;
+  updateEcoUI();
   applyRotation();
   initVolumeUI();
   updateTalkUI();
@@ -1340,7 +1377,7 @@ function connectParent() {
 
   quiet(setDoc(ref, {
     role: "parent", device: DEVICE_ID, session: session.id, name: myName(),
-    talk: par.talkOn, video: par.videoOn, createdAt: serverTimestamp(),
+    talk: par.talkOn, video: par.videoOn, wantVideo: !par.eco, createdAt: serverTimestamp(),
   }));
   par.unsubs.push(onSnapshot(ref, (snap) => onParentConnDoc(pc, snap), (err) => {
     log("Verbindung", err);
@@ -1471,7 +1508,8 @@ function scheduleReconnect(minDelay) {
 function startStatsWatch() {
   stopStatsWatch();
   const pc = par.pc;
-  Object.assign(par.stats, { bytes: -1, audioBytes: -1, stall: 0, audioStall: 0, sawBytes: false, sawAudio: false, energy: null, dur: null });
+  Object.assign(par.stats, { bytes: -1, audioBytes: -1, stall: 0, audioStall: 0, sawBytes: false, sawAudio: false, energy: null, dur: null, frames: -1, frameStall: 0 });
+  par.videoFrozen = false;
   par.timers.stats = setInterval(() => pollStats(pc), 1000);
 }
 function stopStatsWatch() {
@@ -1484,11 +1522,12 @@ async function pollStats(pc) {
   let report;
   try { report = await pc.getStats(); } catch (e) { return; }
   if (pc !== par.pc || !par.connected) return;
-  let bytes = 0, audioBytes = 0, energy = null, dur = null;
+  let bytes = 0, audioBytes = 0, energy = null, dur = null, frames = 0;
   report.forEach(s => {
     if (s.type !== "inbound-rtp") return;
     const kind = s.kind || s.mediaType;
     bytes += s.bytesReceived || 0;
+    if (kind === "video") frames += s.framesDecoded || 0;
     if (kind === "audio") {
       audioBytes += s.bytesReceived || 0;
       if (typeof s.totalAudioEnergy === "number" && typeof s.totalSamplesDuration === "number") {
@@ -1508,6 +1547,14 @@ async function pollStats(pc) {
     showLevel(Math.sqrt(Math.max(0, energy - st.energy) / (dur - st.dur)));
   }
   st.energy = energy; st.dur = dur;
+
+  // Bild eingefroren, obwohl Video an sein sollte? -> Nachtansicht statt Standbild.
+  const cs = roomData.childState || {};
+  const videoExpected = !par.eco && control.childVideoEnabled && cs.hasVideo !== false;
+  if (!videoExpected || frames > st.frames) { st.frameStall = 0; st.frames = frames; } else st.frameStall++;
+  const frozen = videoExpected && st.frameStall >= 4;
+  if (frozen !== par.videoFrozen) { par.videoFrozen = frozen; updateVideoOff(); }
+  else if (!$("video-off").classList.contains("hidden")) updateNightView();
 }
 function showLevel(rms) {
   const meter = $("level-meter");
@@ -1549,11 +1596,14 @@ function updateVideoOff() {
   const cs = roomData.childState || {};
   let txt = "";
   if (par.connected) {
-    if (cs.hasVideo === false) txt = "Keine Kamera am Babybett – nur Ton";
+    if (par.eco) txt = "Akku sparen – nur Ton";
+    else if (cs.hasVideo === false) txt = "Keine Kamera am Babybett – nur Ton";
     else if (!control.childVideoEnabled) txt = "Video ist aus – nur Ton";
+    else if (par.videoFrozen) txt = "Kein Live-Bild";
   }
   $("video-off-text").textContent = txt;
   $("video-off").classList.toggle("hidden", !txt);
+  if (txt) updateNightView();
   // Kleine Hinweise oben: Mikrofon aus / Stromsparmodus
   const infos = [];
   if (control.childAudioEnabled === false) infos.push("Mikrofon am Babybett ist AUS");
@@ -1561,6 +1611,12 @@ function updateVideoOff() {
   $("parent-info").textContent = infos.join(" · ");
   $("parent-info").classList.toggle("hidden", !infos.length);
   $("parent-info").classList.toggle("warn", control.childAudioEnabled === false);
+}
+
+function updateNightView() {
+  $("night-clock").textContent = new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const audioLive = par.connected && !par.noAudio && control.childAudioEnabled !== false;
+  $("night-audio").classList.toggle("hidden", !audioLive);
 }
 
 function updateParentPresenceUI() {
@@ -1639,7 +1695,7 @@ async function toggleTalk() {
     if (!par.talkOn) {
       let s;
       try { s = await getMedia({ audio: AUDIO_CONSTRAINTS }); }
-      catch (e) { log(e); alert("Kein Zugriff aufs Mikrofon.\nBitte in den Einstellungen erlauben."); return; }
+      catch (e) { log(e); showAlert("Kein Mikrofon", "Kein Zugriff aufs Mikrofon.\nBitte in den Einstellungen erlauben."); return; }
       if (!isParent()) { stopStream(s); return; }
       par.mic = s; par.talkOn = true;
       par.talkTrack = await makeVoiceTrack(s.getAudioTracks()[0]);
@@ -1711,7 +1767,7 @@ async function toggleParentVideo() {
     if (!par.videoOn) {
       let s;
       try { s = await getMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 }, frameRate: { ideal: 20 } } }); }
-      catch (e) { log(e); alert("Kein Zugriff auf die Kamera.\nBitte in den Einstellungen erlauben."); return; }
+      catch (e) { log(e); showAlert("Keine Kamera", "Kein Zugriff auf die Kamera.\nBitte in den Einstellungen erlauben."); return; }
       if (!isParent()) { stopStream(s); return; }
       par.cam = s; par.videoOn = true;
       $("parent-self-video").srcObject = s;
@@ -1745,7 +1801,7 @@ async function attachParentSendTracks(pc) {
 }
 // Dem Kind-Gerät mitteilen, ob gerade gesprochen / Video gezeigt wird.
 function publishParentFlags() {
-  if (par.ref) quiet(updateDoc(par.ref, { talk: par.talkOn, video: par.videoOn }));
+  if (par.ref) quiet(updateDoc(par.ref, { talk: par.talkOn, video: par.videoOn, wantVideo: !par.eco }));
 }
 
 /* ----- Fernsteuerung (Menü) ----- */
@@ -1824,6 +1880,20 @@ function syncRemoteControlsUI() {
   }
 }
 
+/* ----- Akku sparen (Eltern): nur Ton, das Babybett schickt diesem Gerät kein Bild ----- */
+$("parent-eco-btn").addEventListener("click", () => {
+  if (!isParent()) return;
+  par.eco = !par.eco;
+  store.set("babyphone_parent_eco", par.eco ? "1" : "0");
+  updateEcoUI();
+  publishParentFlags();
+  updateVideoOff();
+  toast(par.eco ? "Akku sparen: nur Ton, kein Bild." : "Bild ist wieder an.");
+});
+function updateEcoUI() {
+  $("parent-eco-btn").classList.toggle("active", par.eco);
+}
+
 /* ----- Bild drehen (nur für die eigene Eltern-Ansicht, wird pro Raum gemerkt) ----- */
 $("rotate-btn").addEventListener("click", () => {
   if (!isParent()) return;
@@ -1857,9 +1927,12 @@ document.querySelectorAll(".close-sheet").forEach(btn => {
 document.querySelectorAll(".sheet").forEach(sheet => {
   sheet.addEventListener("click", (e) => { if (e.target === sheet) sheet.classList.add("hidden"); });
 });
-document.querySelectorAll(".stop-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    if (confirm("Babyphone wirklich beenden?")) { stopSession(); showScreen("home"); }
+// Beenden über das Menü oder den Verlassen-Knopf oben rechts – immer mit Nachfrage.
+document.querySelectorAll(".stop-btn, [data-exit]").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    if (!session) return;
+    const text = isChild() ? "Das Babybett hört auf zu senden." : "Du hörst und siehst das Babybett dann nicht mehr.";
+    if (await showConfirm("Raum verlassen?", text, "Verlassen")) { stopSession(); showScreen("home"); }
   });
 });
 
@@ -1871,6 +1944,7 @@ function stopSession() {
   document.querySelectorAll(".sheet").forEach(m => m.classList.add("hidden"));
   ["screen-off-curtain", "unmute-overlay", "child-unmute", "parent-talking", "child-info", "parent-info",
    "video-off", "parent-presence", "level-meter", "parent-self-video"].forEach(id => $(id).classList.add("hidden"));
+  closeDialog(false);
   if (!s) return;
 
   stopRoomListener();
@@ -1963,7 +2037,7 @@ window.babyphoneDebug = {
     return {
       session, control, roomData,
       child: { peers: [...child.peers.values()].map(p => ({ id: p.id, name: p.name, state: p.pc.connectionState, talk: p.talk, video: p.video })), cameraId: child.cameraId, hasVideo: child.hasVideo },
-      parent: { connId: par.connId, state: par.pc ? par.pc.connectionState : null, connected: par.connected, attempt: par.attempt, talkOn: par.talkOn, videoOn: par.videoOn, voiceGain: par.voice ? par.voice.gain.gain.value : null },
+      parent: { connId: par.connId, state: par.pc ? par.pc.connectionState : null, connected: par.connected, attempt: par.attempt, talkOn: par.talkOn, videoOn: par.videoOn, eco: par.eco, videoFrozen: par.videoFrozen, voiceGain: par.voice ? par.voice.gain.gain.value : null },
     };
   },
 };

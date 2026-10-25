@@ -26,6 +26,10 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
   Das Menü zeigt, ob die Einstellung **am Babybett angekommen** ist (✓).
 - 🍃 **Stromsparmodus**: Display am Babybett schwarz, Kamera mit weniger Bildern pro Sekunde – Ton läuft normal.
   Ein- und ausschaltbar am Babybett und per Fernsteuerung; Antippen des Babybett-Displays beendet ihn.
+- 🔋 **Akku sparen am Eltern-Gerät**: nur Ton, das Babybett schickt diesem Gerät kein Bild (andere Eltern
+  sehen weiter Video). Statt Bild erscheint eine ruhige **Nachtansicht mit Uhr** und „Ton läuft weiter".
+- 🌙 **Nie ein eingefrorenes Bild**: Ist das Video aus oder hängt das Bild, zeigt die Eltern-Ansicht die Nachtansicht.
+- 🚪 **Raum verlassen**-Knopf oben rechts, mit Nachfrage im App-eigenen Dialog (keine grauen System-Popups).
 - 💾 **Einstellungen bleiben erhalten** – auch wenn man die App verlässt und wieder öffnet, weitere Eltern
   dazukommen oder das Babybett neu startet.
 - 📷 **Video aus** wird bei den Eltern klar angezeigt (kein eingefrorenes Standbild, das live aussieht).
