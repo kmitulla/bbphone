@@ -20,9 +20,14 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
 - 🎤 **Eltern können sprechen** (Knopf „Sprechen"), das Kind-Gerät zeigt „Mama spricht…" und gibt die Stimme aus.
   Mehrere Eltern gleichzeitig funktionieren. Das Mikrofon wird beim Ausschalten wirklich freigegeben.
 - 📹 **Eltern-Video**: Das Kind-Gerät zeigt es **groß**, bei mehreren Eltern als **Splitscreen**.
-- 🎛️ **Fernsteuerung vom Eltern-Gerät**: Kamera wählen, Video an/aus, Videoqualität, Eltern-Video
-  zeigen/verbergen, Lautstärke der Elternstimme. Das Menü zeigt, ob die Einstellung **am Babybett angekommen** ist.
-- 💾 **Einstellungen bleiben erhalten** – auch wenn weitere Eltern dazukommen oder das Babybett neu startet.
+- 🎛️ **Fernsteuerung vom Eltern-Gerät** (Kacheln wie die Windows-11-Schnelleinstellungen):
+  **Video an/aus**, **Mikrofon (Ton) an/aus**, **Stromsparmodus an/aus**, eigenes Bild beim Kind zeigen,
+  **Lautstärke der Elternstimme** (wirkt auch, wenn das Babybett ein iPhone ist), Kamera und Videoqualität.
+  Das Menü zeigt, ob die Einstellung **am Babybett angekommen** ist (✓).
+- 🍃 **Stromsparmodus**: Display am Babybett schwarz, Kamera mit weniger Bildern pro Sekunde – Ton läuft normal.
+  Ein- und ausschaltbar am Babybett und per Fernsteuerung; Antippen des Babybett-Displays beendet ihn.
+- 💾 **Einstellungen bleiben erhalten** – auch wenn man die App verlässt und wieder öffnet, weitere Eltern
+  dazukommen oder das Babybett neu startet.
 - 📷 **Video aus** wird bei den Eltern klar angezeigt (kein eingefrorenes Standbild, das live aussieht).
 - 🔁 **Automatisch neu verbinden** – auch wenn die Verbindung „hängt", das Babybett neu startet
   oder ein Versuch scheitert. Bricht nur der Ton weg, warnt die App: „Verbunden – aber kein Ton!".
@@ -32,8 +37,8 @@ Eine einfache Webapp, die sich wie ein **Babyphone** anfühlt (nicht wie ein Vid
 - 🔄 **Bild drehen** am Eltern-Gerät (wird pro Raum gemerkt).
 - 🚫 **Kein versehentliches Auflegen** – Beenden nur über das Menü (⚙︎ oben links) + Nachfrage.
 - ☀️ **Bildschirm bleibt an** (Wake Lock), solange die Babyphone-Ansicht offen ist.
-- 🌙 **„Display aus"** am Babybett-Handy (schwarzer Bildschirm, Ton + Video laufen weiter).
-- ✨ **„Liquid-Glass"-Design** (iOS-Stil, dunkel/nachttauglich).
+- 🪟 **Windows-11-Design** (Fluent: Mica, Acryl, Taskleiste); Start/Anmelden hell oder dunkel wie das System,
+  die Babyphone-Ansichten immer dunkel.
 
 > **iPhone/iPad:** Apple erlaubt Webseiten nicht, die Lautstärke per Regler zu ändern. Am iPhone stellst
 > du die Lautstärke darum mit den **Tasten am Gerät** ein; der Lautsprecher-Knopf schaltet stumm.
@@ -70,15 +75,16 @@ Deine Firebase-Config steckt **schon eingesetzt** oben in `app.js`.
 
 **Am Babybett (Kind-Gerät):**
 - ⚙︎ oben links: **Kamera** auswählen (alle iPhone-Kameras) und **Videoqualität**.
-- Unten: 🔄 Kamera (Front/Rück), 📷 Video an/aus, 🌙 Display aus (läuft weiter).
+- Unten: Kamera (Front/Rück), Video an/aus, Mikro an/aus, Stromsparen.
 
 **Am Eltern-Gerät:**
 - Unten: **Lautstärke** (Regler; am iPhone die Tasten) + Lautsprecher-Knopf = stumm.
 - Oben neben „Verbunden": **Pegelanzeige** – schlägt aus, wenn es am Babybett laut wird.
 - 🎤 **Sprechen** antippen → das Kind hört eure Stimme (nochmal tippen = aus).
 - 📹 **Mein Video** antippen → das Kind sieht eure Kamera groß.
-- ⚙︎ **Steuern**: das Babybett fernsteuern – Kamera, Video an/aus, Qualität (Daten sparen),
-  euer Video beim Kind zeigen/verbergen, Lautstärke eurer Stimme am Kind-Gerät.
+- ⚙︎ **Steuern**: das Babybett fernsteuern – Kacheln für Video, Mikrofon, Stromsparen und „Mein Bild zeigen",
+  Regler für die Lautstärke eurer Stimme am Babybett, dazu Kamera und Qualität.
+  Ist das Mikrofon am Babybett aus, steht das oben rot im Bild.
   Oben im Menü steht, ob die Einstellung am Babybett angekommen ist (✓).
 
 ---
@@ -277,7 +283,9 @@ Teste in dieser Reihenfolge:
 - [ ] **🎤 Sprechen** am Eltern-Gerät – das Kind-Gerät zeigt „Eltern sprechen…" und gibt die Stimme aus.
 - [ ] **📹 Mein Video** am Eltern-Gerät – das Kind-Gerät blendet das Eltern-Video ein.
 - [ ] **⚙︎ Steuern**: Kamera wählen, Video des Kind-Geräts an/aus, Eltern-Video zeigen/verbergen, Lautstärke der Elternstimme – jeweils erscheint „✓ Babybett ist auf dem aktuellen Stand".
-- [ ] **„Display aus"** am Kind-Gerät – Ton/Video laufen beim Eltern-Gerät weiter.
+- [ ] **Stromsparen** am Kind-Gerät und per Fernsteuerung – Display wird schwarz, Ton/Video laufen beim Eltern-Gerät weiter.
+- [ ] **Mikrofon aus** per Fernsteuerung – Eltern sehen oben rot „Mikrofon am Babybett ist AUS".
+- [ ] Alles einstellen, App auf beiden Geräten schließen und neu öffnen – Einstellungen sind noch da.
 - [ ] Eltern-Bildschirm geht **nicht** von selbst aus (Wake Lock).
 - [ ] **Zweites Eltern-Gerät** dazu – beide sehen gleichzeitig das Bild.
 - [ ] WLAN am Eltern-Gerät kurz aus/an – es verbindet sich **automatisch neu**.

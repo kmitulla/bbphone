@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#0a0e1f" />
+  <meta name="theme-color" content="#202020" />
 
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -16,65 +16,79 @@
 
   <title>Babyphone</title>
   <!-- ?v=… sorgt dafür, dass Handys nach einem Update die neue Version laden -->
-  <link rel="stylesheet" href="styles.css?v=3" />
+  <link rel="stylesheet" href="styles.css?v=4" />
 </head>
 <body>
-  <div class="bg-orbs" aria-hidden="true"><span></span><span></span><span></span></div>
 
   <!-- ================== LADEN ================== -->
   <section id="splash-screen" class="screen active">
     <div class="splash">
-      <span class="brand-icon big" data-icon="moon"></span>
+      <span class="app-logo big" data-icon="moon"></span>
       <div class="spinner"></div>
     </div>
   </section>
 
   <!-- ================== ANMELDEN ================== -->
   <section id="login-screen" class="screen">
-    <form id="login-form" class="card glass" novalidate>
-      <div class="brand"><span class="brand-icon" data-icon="moon"></span><h1>Babyphone</h1></div>
-      <p class="subtitle">Bitte anmelden</p>
+    <form id="login-form" class="window" novalidate>
+      <div class="titlebar"><span class="app-logo" data-icon="moon"></span><span>Babyphone</span></div>
+      <div class="window-body">
+        <div class="avatar"><span data-icon="person"></span></div>
+        <h1 class="page-title center">Anmelden</h1>
 
-      <label class="field-label" for="email">E-Mail</label>
-      <input id="email" type="email" inputmode="email" autocomplete="username" autocapitalize="none" placeholder="name@beispiel.de" />
+        <label class="field-label" for="email">E-Mail</label>
+        <input id="email" class="textbox" type="email" inputmode="email" autocomplete="username" autocapitalize="none" placeholder="name@beispiel.de" />
 
-      <label class="field-label" for="password">Passwort</label>
-      <input id="password" type="password" autocomplete="current-password" placeholder="••••••••" />
+        <label class="field-label" for="password">Passwort</label>
+        <input id="password" class="textbox" type="password" autocomplete="current-password" placeholder="Passwort" />
 
-      <button id="login-btn" type="submit" class="btn btn-primary btn-block">Anmelden</button>
-      <p id="login-error" class="error-text"></p>
-      <p class="hint">Nutzer werden in der Firebase-Konsole angelegt.</p>
+        <button id="login-btn" type="submit" class="btn btn-accent btn-block">Anmelden</button>
+        <p id="login-error" class="error-text"></p>
+        <p class="hint center">Nutzer werden in der Firebase-Konsole angelegt.</p>
+      </div>
     </form>
   </section>
 
   <!-- ================== START / RÄUME ================== -->
   <section id="home-screen" class="screen">
-    <div class="card glass">
-      <div class="topbar">
-        <div class="brand small"><span class="brand-icon" data-icon="moon"></span><h1>Babyphone</h1></div>
-        <button id="logout-btn" type="button" class="btn btn-ghost btn-sm">Abmelden</button>
+    <div class="window">
+      <div class="titlebar">
+        <span class="app-logo" data-icon="moon"></span><span>Babyphone</span>
+        <span class="titlebar-spacer"></span>
+        <button id="logout-btn" type="button" class="btn btn-subtle btn-sm">Abmelden</button>
       </div>
-      <p id="user-line" class="muted small-line"></p>
+      <div class="window-body">
+        <h1 class="page-title">Räume</h1>
+        <p id="user-line" class="caption"></p>
 
-      <h2 class="section-title">Räume</h2>
-      <div id="room-list" class="room-list"></div>
-      <p id="room-empty" class="muted">Noch keine Räume. Lege unten einen an.</p>
-      <p id="room-error" class="error-text hidden"></p>
+        <div id="room-list" class="card-list"></div>
+        <p id="room-empty" class="caption">Noch keine Räume. Lege unten einen an.</p>
+        <p id="room-error" class="error-text hidden"></p>
 
-      <label class="field-label" for="room">Raumname</label>
-      <div class="row">
-        <input id="room" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="z.B. kinderzimmer" />
-        <button id="create-room-btn" type="button" class="btn btn-soft">Anlegen</button>
+        <div class="settings-card new-room">
+          <span class="card-icon" data-icon="add"></span>
+          <input id="room" class="textbox" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Neuer Raum, z.B. kinderzimmer" aria-label="Raumname" />
+          <button id="create-room-btn" type="button" class="btn">Anlegen</button>
+        </div>
+
+        <h2 class="section-title">Starten</h2>
+        <button id="send-btn" type="button" class="settings-card action">
+          <span class="card-icon accent" data-icon="broadcast"></span>
+          <span class="card-text"><span class="card-title">Senden</span><span class="card-sub">Dieses Handy liegt am Babybett</span></span>
+          <span class="chevron" data-icon="chevron"></span>
+        </button>
+        <button id="receive-btn" type="button" class="settings-card action">
+          <span class="card-icon accent" data-icon="eye"></span>
+          <span class="card-text"><span class="card-title">Empfangen</span><span class="card-sub">Eltern-Gerät: sehen, hören, sprechen</span></span>
+          <span class="chevron" data-icon="chevron"></span>
+        </button>
+        <p class="hint">Beide Geräte öffnen denselben Raum.</p>
       </div>
-      <p class="hint">Beide Geräte öffnen denselben Raum.</p>
-
-      <button id="send-btn" type="button" class="btn btn-green btn-block btn-big"><span class="ic-lg" data-icon="broadcast"></span><span class="btn-main">SENDEN</span><span class="btn-sub">Handy am Babybett</span></button>
-      <button id="receive-btn" type="button" class="btn btn-blue btn-block btn-big"><span class="ic-lg" data-icon="eye"></span><span class="btn-main">EMPFANGEN</span><span class="btn-sub">Eltern-Gerät</span></button>
     </div>
   </section>
 
   <!-- ================== KIND / SENDER (Babybett) ================== -->
-  <section id="child-screen" class="screen">
+  <section id="child-screen" class="screen video-screen">
     <video id="local-video" class="full-video" autoplay playsinline muted></video>
 
     <!-- Bühne für das Eltern-Video: groß; bei mehreren Eltern Splitscreen -->
@@ -83,63 +97,69 @@
     <div id="parent-audios" class="hidden"></div>
 
     <div id="screen-off-curtain" class="curtain hidden">
-      <p>Display aus – das Babyphone läuft weiter.<br />Tippen zum Aufwecken.</p>
+      <p>Stromsparmodus – das Babyphone läuft weiter.<br />Tippen zum Aufwecken.</p>
     </div>
 
     <div class="top-chips">
-      <div class="status-pill glass" id="child-status">Verbinde…</div>
-      <div class="info-chip glass hidden" id="child-info"></div>
+      <div class="status-pill" id="child-status">Verbinde…</div>
+      <div class="info-chip hidden" id="child-info"></div>
     </div>
-    <button type="button" class="corner-btn glass" data-open="child-menu" aria-label="Menü"><span class="ic" data-icon="gear"></span></button>
+    <button type="button" class="corner-btn acrylic" data-open="child-menu" aria-label="Menü"><span class="ic" data-icon="gear"></span></button>
 
     <div id="parent-talking" class="talk-indicator hidden"><span class="ic" data-icon="volume-high"></span> <span id="parent-talking-text">Eltern sprechen…</span></div>
 
     <!-- Falls der Ton blockiert ist: einmal tippen -->
     <div id="child-unmute" class="unmute-overlay hidden">
-      <div class="unmute-box glass"><span class="ic" data-icon="volume-high"></span> Tippen, um die Eltern zu hören</div>
+      <div class="unmute-box acrylic"><span class="ic" data-icon="volume-high"></span> Tippen, um die Eltern zu hören</div>
     </div>
 
-    <div class="dock">
-      <button id="child-cam-btn" type="button" class="dock-btn glass"><span class="ic" data-icon="flip"></span><span class="lbl">Kamera</span></button>
-      <button id="child-video-toggle" type="button" class="dock-btn glass"><span class="ic" data-icon="video"></span><span class="lbl">Video an</span></button>
-      <button id="screen-off-btn" type="button" class="dock-btn glass"><span class="ic" data-icon="moon"></span><span class="lbl">Display aus</span></button>
-    </div>
+    <nav class="taskbar acrylic">
+      <button id="child-cam-btn" type="button" class="dock-btn"><span class="ic" data-icon="flip"></span><span class="lbl">Kamera</span></button>
+      <button id="child-video-toggle" type="button" class="dock-btn"><span class="ic" data-icon="video"></span><span class="lbl">Video an</span></button>
+      <button id="child-mic-toggle" type="button" class="dock-btn"><span class="ic" data-icon="mic"></span><span class="lbl">Mikro an</span></button>
+      <button id="screen-off-btn" type="button" class="dock-btn"><span class="ic" data-icon="leaf"></span><span class="lbl">Stromsparen</span></button>
+    </nav>
 
     <!-- Menü / Einstellungen Kind -->
     <div id="child-menu" class="sheet hidden">
-      <div class="sheet-inner glass">
-        <div class="sheet-handle"></div>
-        <h2>Einstellungen <span class="room-name-label muted"></span></h2>
+      <div class="flyout acrylic">
+        <div class="flyout-body">
+          <h2 class="flyout-title">Einstellungen <span class="room-name-label"></span></h2>
 
-        <label class="field-label" for="child-camera-select">Kamera</label>
-        <select id="child-camera-select" class="select"></select>
+          <label class="field-label" for="child-camera-select">Kamera</label>
+          <select id="child-camera-select" class="select"></select>
 
-        <label class="field-label" for="child-quality-select">Videoqualität</label>
-        <select id="child-quality-select" class="select">
-          <option value="low">Niedrig – spart Daten</option>
-          <option value="medium" selected>Mittel</option>
-          <option value="high">Hoch – beste Qualität</option>
-        </select>
+          <label class="field-label" for="child-quality-select">Videoqualität</label>
+          <select id="child-quality-select" class="select">
+            <option value="low">Niedrig – spart Daten</option>
+            <option value="medium" selected>Mittel</option>
+            <option value="high">Hoch – beste Qualität</option>
+          </select>
 
-        <p class="hint">Tipp: Handy ans Ladekabel. Geht das Display trotzdem aus, am iPhone
-          <b>Einstellungen → Anzeige &amp; Helligkeit → Automatische Sperre → Nie</b> wählen.
-          Die App muss im Vordergrund bleiben.</p>
-
-        <button type="button" class="btn btn-soft btn-block close-sheet">Schließen</button>
-        <button type="button" class="btn btn-danger btn-block stop-btn">Senden beenden</button>
+          <div class="infobar">
+            <span class="ic" data-icon="info"></span>
+            <p>Handy ans Ladekabel. Geht das Display trotzdem aus, am iPhone
+              <b>Einstellungen → Anzeige &amp; Helligkeit → Automatische Sperre → Nie</b> wählen.
+              Die App muss im Vordergrund bleiben.</p>
+          </div>
+        </div>
+        <div class="flyout-footer">
+          <button type="button" class="btn close-sheet">Schließen</button>
+          <button type="button" class="btn btn-danger stop-btn">Senden beenden</button>
+        </div>
       </div>
     </div>
   </section>
 
   <!-- ================== ELTERN / EMPFÄNGER ================== -->
-  <section id="parent-screen" class="screen">
+  <section id="parent-screen" class="screen video-screen">
     <div id="remote-wrap" class="remote-wrap">
       <!-- Bild stumm; der Ton läuft über remote-audio (zuverlässiger, v.a. iPhone) -->
       <video id="remote-video" class="full-video" autoplay playsinline muted></video>
     </div>
     <audio id="remote-audio" autoplay playsinline></audio>
 
-    <video id="parent-self-video" class="pip glass hidden" autoplay playsinline muted></video>
+    <video id="parent-self-video" class="pip hidden" autoplay playsinline muted></video>
 
     <div id="video-off" class="video-off hidden">
       <span class="ic" data-icon="video-off"></span>
@@ -152,90 +172,104 @@
     </div>
 
     <div id="unmute-overlay" class="unmute-overlay hidden">
-      <div class="unmute-box glass"><span class="ic" data-icon="volume-high"></span> Tippen, um den Ton einzuschalten</div>
+      <div class="unmute-box acrylic"><span class="ic" data-icon="volume-high"></span> Tippen, um den Ton einzuschalten</div>
     </div>
 
     <div class="top-chips">
       <div class="status-row">
-        <div class="status-pill glass" id="parent-status">Verbinde…</div>
-        <div id="level-meter" class="level-meter glass hidden" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="status-pill" id="parent-status">Verbinde…</div>
+        <div id="level-meter" class="level-meter acrylic hidden" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
       </div>
-      <div class="presence-chip glass hidden" id="parent-presence"></div>
+      <div class="presence-chip hidden" id="parent-presence"></div>
+      <div class="info-chip hidden" id="parent-info"></div>
     </div>
-    <button type="button" class="corner-btn glass" data-open="parent-menu" aria-label="Menü"><span class="ic" data-icon="gear"></span></button>
+    <button type="button" class="corner-btn acrylic" data-open="parent-menu" aria-label="Menü"><span class="ic" data-icon="gear"></span></button>
 
     <!-- Untere Steuerleiste Eltern -->
     <div class="parent-controls">
-      <div id="volume-row" class="volume-row glass">
+      <div id="volume-row" class="volume-row acrylic">
         <button id="mute-btn" type="button" class="mute-btn" aria-label="Ton aus/an"><span class="vol-icon" data-icon="volume-high"></span></button>
-        <input id="volume-slider" type="range" min="0" max="100" value="100" aria-label="Lautstärke" />
+        <input id="volume-slider" class="range" type="range" min="0" max="100" value="100" aria-label="Lautstärke" />
         <span class="vol-hint">Lautstärke mit den Tasten am Gerät</span>
       </div>
-      <div class="dock">
-        <button id="talk-btn" type="button" class="dock-btn glass talk"><span class="ic" data-icon="mic"></span><span class="lbl">Sprechen</span></button>
-        <button id="parent-video-btn" type="button" class="dock-btn glass"><span class="ic" data-icon="video"></span><span class="lbl">Mein Video</span></button>
-        <button id="rotate-btn" type="button" class="dock-btn glass"><span class="ic" data-icon="rotate"></span><span class="lbl">Drehen</span></button>
-        <button type="button" class="dock-btn glass" data-open="parent-menu"><span class="ic" data-icon="sliders"></span><span class="lbl">Steuern</span></button>
-      </div>
+      <nav class="taskbar acrylic">
+        <button id="talk-btn" type="button" class="dock-btn talk"><span class="ic" data-icon="mic"></span><span class="lbl">Sprechen</span></button>
+        <button id="parent-video-btn" type="button" class="dock-btn"><span class="ic" data-icon="video"></span><span class="lbl">Mein Video</span></button>
+        <button id="rotate-btn" type="button" class="dock-btn"><span class="ic" data-icon="rotate"></span><span class="lbl">Drehen</span></button>
+        <button type="button" class="dock-btn" data-open="parent-menu"><span class="ic" data-icon="sliders"></span><span class="lbl">Steuern</span></button>
+      </nav>
     </div>
 
-    <!-- Menü / Fernsteuerung Eltern -->
+    <!-- Fernsteuerung Eltern (wie die Windows-11-Schnelleinstellungen) -->
     <div id="parent-menu" class="sheet hidden">
-      <div class="sheet-inner glass">
-        <div class="sheet-handle"></div>
-        <h2>Babybett fernsteuern <span class="room-name-label muted"></span></h2>
+      <div class="flyout acrylic">
+        <div class="flyout-body">
+          <h2 class="flyout-title">Babybett fernsteuern <span class="room-name-label"></span></h2>
+          <p id="rc-state" class="rc-state"></p>
 
-        <p class="section-title">Wer ist im Raum</p>
-        <div id="presence-list" class="presence-list"><span class="muted">–</span></div>
+          <div class="qs-grid">
+            <button type="button" class="qs-tile" data-ctl="childVideoEnabled"><span class="qs-btn"><span data-icon="video"></span></span><span class="qs-lbl">Video</span></button>
+            <button type="button" class="qs-tile" data-ctl="childAudioEnabled"><span class="qs-btn"><span data-icon="mic"></span></span><span class="qs-lbl">Mikrofon</span></button>
+            <button type="button" class="qs-tile" data-ctl="powerSave"><span class="qs-btn"><span data-icon="leaf"></span></span><span class="qs-lbl">Stromsparen</span></button>
+            <button type="button" class="qs-tile" data-ctl="showParentVideoOnChild"><span class="qs-btn"><span data-icon="person"></span></span><span class="qs-lbl">Mein Bild zeigen</span></button>
+          </div>
 
-        <p class="section-title">Kind-Gerät</p>
-        <p id="rc-state" class="rc-state"></p>
+          <div class="slider-row">
+            <span class="ic" data-icon="volume-high" title="Lautstärke eurer Stimme am Babybett"></span>
+            <input id="rc-child-volume" class="range" type="range" min="0" max="100" value="80" aria-label="Lautstärke eurer Stimme am Babybett" />
+            <span id="rc-volume-value" class="slider-value">80 %</span>
+          </div>
+          <p class="caption">Lautstärke eurer Stimme am Babybett</p>
 
-        <label class="field-label" for="rc-camera">Kamera</label>
-        <select id="rc-camera" class="select"></select>
+          <div class="form-grid">
+            <div>
+              <label class="field-label" for="rc-camera">Kamera</label>
+              <select id="rc-camera" class="select"></select>
+            </div>
+            <div>
+              <label class="field-label" for="rc-quality">Videoqualität</label>
+              <select id="rc-quality" class="select">
+                <option value="low">Niedrig</option>
+                <option value="medium">Mittel</option>
+                <option value="high">Hoch</option>
+              </select>
+            </div>
+          </div>
 
-        <label class="field-label" for="rc-quality">Videoqualität</label>
-        <select id="rc-quality" class="select">
-          <option value="low">Niedrig – spart Daten</option>
-          <option value="medium">Mittel</option>
-          <option value="high">Hoch – beste Qualität</option>
-        </select>
+          <h3 class="section-title">Wer ist im Raum</h3>
+          <div id="presence-list" class="presence-list"><span class="caption">–</span></div>
 
-        <div class="ctrl-row">
-          <span>Video des Kind-Geräts an</span>
-          <label class="switch"><input type="checkbox" id="rc-child-video" checked><span class="slider"></span></label>
+          <div class="infobar">
+            <span class="ic" data-icon="info"></span>
+            <p>Dieses Gerät muss die App im Vordergrund offen haben. Wechselst du die App oder sperrst das Display,
+              stoppt das iPhone den Ton. Beim Zurückkommen verbindet sich die App neu – alle Einstellungen bleiben erhalten.</p>
+          </div>
         </div>
-        <div class="ctrl-row">
-          <span>Mein Video beim Kind zeigen</span>
-          <label class="switch"><input type="checkbox" id="rc-show-parent" checked><span class="slider"></span></label>
+        <div class="flyout-footer">
+          <button type="button" class="btn close-sheet">Schließen</button>
+          <button type="button" class="btn btn-danger stop-btn">Empfang beenden</button>
         </div>
-
-        <label class="field-label" for="rc-child-volume">Lautstärke eurer Stimme am Kind-Gerät</label>
-        <input id="rc-child-volume" type="range" min="0" max="100" value="80" class="wide-range" />
-        <p id="rc-volume-hint" class="hint hidden">Das Kind-Gerät ist ein iPhone/iPad – dort lässt sich die Lautstärke nur mit den Tasten am Gerät einstellen.</p>
-
-        <p class="hint">Wichtig: Dieses Gerät muss die App im Vordergrund offen haben.
-          Wechselst du die App oder sperrst das Display, stoppt das iPhone den Ton. Beim Zurückkommen verbindet die App sich neu.</p>
-
-        <button type="button" class="btn btn-soft btn-block close-sheet">Schließen</button>
-        <button type="button" class="btn btn-danger btn-block stop-btn">Empfang beenden</button>
       </div>
     </div>
   </section>
 
-  <!-- ===== Start-Tor (Lesezeichen-Link) ===== -->
+  <!-- ===== Start-Tor (Lesezeichen-Link) – Windows-11-Dialog ===== -->
   <div id="start-gate" class="start-gate hidden">
-    <div class="start-gate-box glass">
-      <div class="brand"><span class="brand-icon" data-icon="moon"></span><h1>Babyphone</h1></div>
-      <p id="start-gate-text" class="muted"></p>
-      <p id="start-gate-presence" class="presence-line"></p>
-      <button id="start-gate-btn" type="button" class="btn btn-primary btn-block btn-big">Starten</button>
-      <button id="start-gate-home" type="button" class="btn btn-ghost btn-block">Zur Übersicht</button>
+    <div class="dialog">
+      <div class="dialog-body">
+        <div class="dialog-head"><span class="app-logo" data-icon="moon"></span><h2>Babyphone</h2></div>
+        <p id="start-gate-text"></p>
+        <p id="start-gate-presence" class="presence-line"></p>
+      </div>
+      <div class="dialog-footer">
+        <button id="start-gate-btn" type="button" class="btn btn-accent">Starten</button>
+        <button id="start-gate-home" type="button" class="btn">Zur Übersicht</button>
+      </div>
     </div>
   </div>
 
-  <div id="toast" class="toast glass hidden" role="status" aria-live="polite"></div>
+  <div id="toast" class="toast acrylic hidden" role="status" aria-live="polite"></div>
 
-  <script type="module" src="app.js?v=3"></script>
+  <script type="module" src="app.js?v=4"></script>
 </body>
 </html>
